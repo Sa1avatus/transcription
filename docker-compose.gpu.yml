@@ -1,0 +1,12 @@
+# RTX 3050 / 4 GB profile: local NLLB-600M with CUDA, Qwen disabled.
+# Requires NVIDIA Container Toolkit on the Docker host.
+services:
+  worker:
+    gpus: all
+    build:
+      dockerfile: Dockerfile.worker.gpu
+    environment:
+      TRANSLATION_BACKEND: nllb_600m
+      LOAD_LOCAL_MODELS: "true"
+      WHISPER_MODEL_SIZE: small
+      ENABLE_QWEN_CORRECTION: "false"

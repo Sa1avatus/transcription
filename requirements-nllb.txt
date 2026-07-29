@@ -1,0 +1,2 @@
+# Optional local NLLB translation backend. Not installed in the default worker image.
+transformers>=4.42,<5
