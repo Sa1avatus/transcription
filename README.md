@@ -1,113 +1,149 @@
 # Transcription Service
 
-Асинхронный сервис транскрибации и перевода. Поток обработки: **upload → Redis queue → ML worker → SQLite task store → polling**. Есть HTTP API, дашборд и опциональный Telegram-адаптер.
+[Русский](README.ru.md) | **English**
 
-## Архитектура
+An asynchronous service for audio transcription, text translation, and image text recognition. The project demonstrates the complete job flow: the HTTP API and Telegram bot accept a file, Redis delivers the job to an ML worker, and PostgreSQL keeps the shared status and result.
 
-```text
-Browser / client ──> API + dashboard ──> Redis ──> ML worker
-                         │                              │
-                         └──────── SQLite ──────────────┘
-                                        │
-                              optional Telegram bot
+## Features
+
+- Accepts audio through the HTTP API, Telegram, and an Omnitracker integration.
+- Transcribes speech with Whisper, using either a local model or an external provider.
+- Translates results with Gemini, DeepL, or local NLLB.
+- Recognizes and describes images with Gemini Vision.
+- Displays personal usage statistics in a Telegram Mini App.
+- Runs API, worker, and Telegram bot as separate containers; CPU, NVIDIA GPU, and Kubernetes deployment manifests are supported.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser["Browser / HTTP client"] --> API["API and dashboard"]
+    Telegram["Telegram"] --> Bot["Telegram bot"]
+    Bot --> API
+    API -->|"creates task"| Postgres[("PostgreSQL\nstatuses, results, translations")]
+    API -->|"publishes job"| Redis[("Redis\nqueue")]
+    Bot -->|"publishes job"| Redis
+    Redis --> Worker["ML worker"]
+    Worker -->|"reads audio"| Audio[("Shared storage\naudio files")]
+    Worker -->|"loads read-only"| Models[("Local models\nWhisper / NLLB / Qwen")]
+    GPU["Optional NVIDIA GPU"] -. accelerates .-> Worker
+    Worker -->|"stores result"| Postgres
+    Worker -->|"completed result"| Telegram
+    API --> MiniApp["Telegram Mini App\n/miniapp"]
+    MiniApp -->|"signed initData"| API
+    API -->|"personal statistics"| Postgres
 ```
 
-Контейнеры разделены по профилю нагрузки, а не ради «микросервисов»:
+In distributed deployments, PostgreSQL is the source of truth for tasks and translations, while Redis transports jobs. Local SQLite and `asyncio.Queue` are development fallbacks only, for a simplified single-process setup.
 
-| Контейнер | Роль | Зависимости |
-| --- | --- | --- |
-| `api` | HTTP API, dashboard, создание задач и polling | лёгкий Python web stack |
-| `worker` | Whisper, Qwen, NLLB и вызовы внешней транскрибации | ML/GPU stack |
-| `bot` | Telegram-интерфейс | aiogram; запускается отдельным profile |
-| `redis` | межпроцессная очередь задач | Redis с persistence |
+## Quick start with Docker Compose
 
-API не импортирует локальные ML-библиотеки: тяжёлые зависимости и модели находятся только в `worker`. Это уменьшает размер и время запуска публичного сервиса.
-
-## Docker Compose
-
-1. Подготовьте окружение:
+### 1. Prepare the environment
 
 ```powershell
 cd transcription
 Copy-Item .env.example .env
 ```
 
-2. Если нужен локальный Whisper/NLLB/Qwen, положите модели в каталог из `MODEL_DIRECTORY` (по умолчанию `./models`). Docker подключит его в worker как `/app/data/models` в режиме read-only. Укажите реальные ключи интеграций в `.env`.
+Open `.env` and fill in only the integrations you need:
 
-3. Запустите API, worker и Redis:
+- `TELEGRAM_BOT_TOKEN` for the bot;
+- `GEMINI_API_KEY` or `DEEPL_API_KEY` for the corresponding translation or vision backend;
+- `TRANSLATION_BACKEND`, for example `gemini`, `deepl`, or `nllb_600m`;
+- `POSTGRES_PASSWORD`: use your own password outside a demo environment.
+
+Never commit `.env`: it contains secrets.
+
+### 2. Optionally attach local models
+
+By default, `MODEL_DIRECTORY=./models`. Put Whisper, NLLB, or Qwen model directories there, or set a different path. The worker mounts it read-only at `/app/data/models`.
+
+`models/` can occupy tens of gigabytes and must not be included in a Docker image or Git. `data/`, which may contain local audio files, is also excluded from Git.
+
+### 3. Start the CPU configuration
 
 ```powershell
 docker compose up --build
 ```
 
-Дашборд будет доступен по `http://localhost:5000/`, health-check — по `/health`.
+This starts `api`, `worker`, `redis`, and `postgres`. The dashboard is available at `http://localhost:5000/`; the health endpoint is `http://localhost:5000/health`.
 
-Telegram-адаптер не стартует по умолчанию:
+When using Compose, leave `REDIS_URL` blank in `.env`: Compose passes `redis://redis:6379/0` to containers automatically. For a local non-Compose run with an external Redis instance, use `REDIS_URL=redis://localhost:6379/0`.
+
+### 4. Start the Telegram bot
 
 ```powershell
 docker compose --profile telegram up --build
 ```
 
-Для NVIDIA GPU (после установки NVIDIA Container Toolkit) добавьте override:
+The profile adds the `bot` container. One Telegram token must be served by exactly one long-polling bot replica.
+
+### 5. Use an NVIDIA GPU
+
+After installing NVIDIA Container Toolkit, the GPU override switches the worker to a CUDA image, enables local NLLB-600M, and selects Whisper `small`:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 ```
 
-Текущий GPU override рассчитан на RTX 3050 с 4 ГБ VRAM: он включает CUDA-вариант PyTorch и NLLB-600M, выбирает Whisper `small` и отключает Qwen-коррекцию. Это важно: одновременная загрузка NLLB-1.3B, Whisper `medium` и Qwen в 4 ГБ видеопамяти ненадёжна и обычно приводит к `CUDA out of memory`.
+To include the Telegram bot:
 
-### Повторная GPU-сборка
+```powershell
+docker compose --profile telegram -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
 
-Docker автоматически использует кэш успешно завершённых слоёв. Собирайте только worker и **не** добавляйте `--no-cache`:
+The current profile targets an RTX 3050 with 4 GB VRAM. Qwen correction is disabled because loading a larger Whisper model, NLLB, and Qwen together can cause `CUDA out of memory`.
+
+If a worker build is interrupted, rebuild only the worker without `--no-cache`; Docker will reuse completed layers:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml build worker
 ```
 
-GPU Dockerfile разделяет установку зависимостей на отдельные слои и сохраняет pip-кэш BuildKit. Если скачивание PyTorch оборвётся, повторите ту же команду: завершённые этапы будут взяты из кэша, а wheel-файлы не потребуется получать заново. Docker не может продолжить ровно с середины одной упавшей команды, но такая структура минимизирует повторную работу.
+## Telegram Mini App
 
-Если в логе есть `ReadTimeoutError` при `files.pythonhosted.org`, это временный сетевой таймаут PyPI. В Dockerfile заданы 10 повторов и 180-секундный timeout; просто повторите ту же команду сборки. Не запускайте одновременно `up --build` для всех сервисов — конкурирующие скачивания делают нестабильную сеть ещё хуже.
+The Mini App displays a user's transcription, translation, and recent-task statistics. Send `/stats` to the bot and press **Open statistics**. With a configured URL, a menu button is also available.
 
-`Dockerfile` создаёт лёгкий API-образ. `Dockerfile.worker` — CPU worker, `Dockerfile.worker.gpu` — NVIDIA CUDA/cuDNN worker для локального NLLB и Whisper, а `Dockerfile.bot` содержит зависимости Telegram. Модели подключаются volume-ом и не попадают в образ или Git.
+Telegram requires a public HTTPS URL. Set the Mini App page address in `.env`:
 
-Файл `.dockerignore` исключает `models/`, `data/`, `.env`, виртуальные окружения и тестовые артефакты из Docker build context. Это принципиально: локальные модели могут занимать десятки гигабайт, но worker получает их только через read-only volume `MODEL_DIRECTORY:/app/data/models`.
+```dotenv
+WEBAPP_URL=https://stats.example.com/miniapp
+```
 
-Локальный NLLB — отдельная опция. При `TRANSLATION_BACKEND=gemini` или `deepl` оставьте `INSTALL_NLLB=false`: PyTorch и Transformers не будут попадать в CPU worker-образ. GPU override автоматически выбирает `Dockerfile.worker.gpu`, устанавливает CUDA-вариант PyTorch и включает NLLB-600M. Для CPU NLLB установите `INSTALL_NLLB=true`; worker добавит CPU-вариант PyTorch.
+Restart the bot after changing this value. The server validates the signature of `Telegram.WebApp.initData`; it never trusts a user identifier supplied by the browser.
 
-Qwen-коррекция также отделена от базового worker: для CPU-профиля включайте одновременно `ENABLE_QWEN_CORRECTION=true` и `INSTALL_QWEN=true`. В GPU-профиле RTX 3050 4 GB оставляйте оба значения `false`.
+For temporary local testing with Cloudflare Tunnel or ngrok, expose only `miniapp-gateway` on `127.0.0.1:5050`. It permits only `/miniapp` and protected `POST /api/miniapp/stats`; do not expose the full API directly on port 5000.
 
-### Redis URL
+## Main API routes
 
-При запуске через Compose оставьте `REDIS_URL` пустым: Compose сам передаёт контейнерам `redis://redis:6379/0`, где `redis` — имя сервиса во внутренней Docker-сети.
+| Route | Purpose |
+| --- | --- |
+| `POST /transcrib/` | Submit an audio file, `base64_data`, or an Omnitracker `uid`. |
+| `GET /task/<task_id>` | Get task status and result. |
+| `GET /task/` | Get task history for the dashboard. |
+| `GET /translated/<task_id>/<language>` | Get or create a cached translation. |
+| `GET /health` | Check API health. |
 
-Для локального запуска с внешним Redis укажите `REDIS_URL=redis://localhost:6379/0`. Если переменная пуста при монолитном запуске, используется встроенная `asyncio.Queue` — это удобно для разработки, но не позволяет API и worker работать в разных процессах.
+## Local development without Docker
 
-> SQLite в этой конфигурации подходит для демонстрации и одного worker. Включены WAL и busy timeout для совместного доступа контейнеров. Для нескольких worker или production-нагрузки следующим шагом будет PostgreSQL.
+For API-only development:
 
-## Локальный монолитный запуск
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python app.py
+```
 
-Для разработки без Docker очистите `REDIS_URL`, оставьте `RUN_EMBEDDED_WORKER=true` и установите ML-зависимости:
+For an embedded worker, install the ML dependencies too:
 
 ```powershell
 pip install -r requirements-worker.txt
 python app.py
 ```
 
-Для локального NLLB дополнительно выполните `pip install -r requirements-nllb.txt` и установите подходящий PyTorch для вашей CPU/GPU-среды.
-
-Для API-only локально достаточно `pip install -r requirements.txt`, но без worker задачи не будут обрабатываться.
-
-## API
-
-- `POST /transcrib/` — принять аудиофайл, `base64_data` или OMNINET `uid`.
-- `GET /task/<task_id>` — состояние и результат задачи.
-- `GET /task/` — история задач для дашборда.
-- `GET /translated/<task_id>/<language>` — получить или создать кэшированный перевод.
-- `GET /health` — проверка работоспособности.
-
-## Security
-
-Скопируйте `.env.example` в `.env`; этот файл игнорируется Git. TLS verification включена по умолчанию. `INTERNAL_TLS_VERIFY=false` допустим только для контролируемого внутреннего endpoint с self-signed сертификатом. Секреты, которые ранее попадали в код, необходимо отозвать и перевыпустить.
+Local NLLB and Qwen dependencies are separated into `requirements-nllb.txt` and `requirements-qwen.txt`.
 
 ## Verification
 
@@ -119,63 +155,10 @@ pytest -q
 
 ## Kubernetes
 
-Kubernetes deployment lives in [`k8s/`](k8s).  It separates the API, GPU
-worker, Telegram bot, Redis and PostgreSQL. PostgreSQL is the authoritative
-task store, so API replicas and the worker observe the same status.
-See [`k8s/README.md`](k8s/README.md) for the storage/GPU requirements and the
-important distinction between Docker Desktop kind and a production cluster.
+Deployment manifests are in [`k8s/`](k8s). Production requires `ReadWriteMany` shared storage for audio and models, real secrets outside Git, and GPU resources available to worker nodes. See [`k8s/README.md`](k8s/README.md) for the detailed requirements and Docker Desktop limitations: its local Kubernetes cluster should not be treated as a guaranteed source of NVIDIA GPU devices.
 
-Before deployment:
+## Security
 
-1. Publish the three images and replace `ghcr.io/your-org/...:TAG` in
-   `k8s/application.yaml`.
-2. Ensure the cluster has the NVIDIA device plugin and a StorageClass that
-   supports `ReadWriteMany`. The `transcription-data` PVC is shared because
-   the API/bot download an audio file and the worker reads that same file.
-3. Put Whisper and NLLB model directories on the `transcription-models` PVC.
-4. Create the real secret outside Git:
-
-```powershell
-Copy-Item k8s/secret.example.yaml k8s/secret.yaml
-# Replace all REPLACE_* values in k8s/secret.yaml
-kubectl apply -f k8s/namespace.yaml
-kubectl -n transcription apply -f k8s/secret.yaml
-kubectl apply -k k8s/
-kubectl -n transcription get pods
-```
-
-`secret.example.yaml` is intentionally not included in `kustomization.yaml`:
-it contains placeholders and must never be applied as-is. The bot has one
-replica because Telegram long polling permits only one active consumer for a
-given token. The worker has one GPU by default; scale it only after confirming
-that the model volume and available GPUs support the required parallelism.
-
-For Docker Compose, recreate services after this change so they start with
-PostgreSQL rather than the legacy SQLite fallback:
-
-```powershell
-docker compose --profile telegram -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
-```
-
-## Telegram Mini App: personal statistics
-
-The bot can open a personal statistics page inside Telegram. The page is served
-by the existing API at `/miniapp`; it shows a user's transcription count,
-translation count, task states, common target languages and recent tasks.
-
-The API trusts neither a browser-supplied Telegram ID nor `initDataUnsafe`.
-It validates the signed `Telegram.WebApp.initData` server-side before querying
-statistics. This keeps one user's history private from other users.
-
-To enable the **Statistics** menu button, publish the API through a public
-HTTPS URL and set it in `.env`:
-
-```dotenv
-WEBAPP_URL=https://stats.example.com/miniapp
-```
-
-Restart only the bot after changing this value. For local Telegram testing use
-a temporary HTTPS tunnel to the restricted `miniapp-gateway` on port 5050;
-do not expose the full API port 5000. `http://localhost:5000/miniapp` works in
-a desktop browser but Telegram clients require HTTPS. See the official
-[Telegram Mini Apps documentation](https://core.telegram.org/bots/webapps).
+- Never commit `.env`, `models/`, `data/`, virtual environments, or real Kubernetes secrets.
+- TLS verification is enabled by default. Set `INTERNAL_TLS_VERIFY=false` only for a controlled internal endpoint with a self-signed certificate.
+- Use your own PostgreSQL password and integration secrets for public deployments.
