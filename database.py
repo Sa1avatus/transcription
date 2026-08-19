@@ -289,6 +289,7 @@ async def db_get_user_statistics(chat_id: str) -> dict:
 if __import__("config").settings.database_url:
     from database_postgres import (  # noqa: F401
         db_all_tasks,
+        db_get_all_settings,
         db_get_all_translations,
         db_get_task,
         db_get_translation,
@@ -296,6 +297,7 @@ if __import__("config").settings.database_url:
         db_insert_task,
         db_restore_task_store,
         db_update_task,
+        db_upsert_settings,
         db_upsert_translation,
         init_db,
     )

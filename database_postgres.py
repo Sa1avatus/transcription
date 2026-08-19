@@ -51,6 +51,13 @@ def _sync_init_db() -> None:
                 UNIQUE (task_id, tgt_lang)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+        """)
     logger.info("[DB] PostgreSQL initialised")
 
 
@@ -181,3 +188,29 @@ def _sync_user_statistics(chat_id: str) -> dict:
 
 async def db_get_user_statistics(chat_id: str) -> dict:
     return await _run(_sync_user_statistics, chat_id)
+
+
+def _sync_get_all_settings() -> dict[str, str]:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT key, value FROM settings")
+        return {row["key"]: row["value"] for row in cur.fetchall()}
+
+
+def _sync_upsert_settings(data: dict[str, str]) -> None:
+    now = _now()
+    with _connect() as conn, conn.cursor() as cur:
+        for key, value in data.items():
+            cur.execute(
+                """INSERT INTO settings (key, value, updated_at)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at""",
+                (key, value, now),
+            )
+
+
+async def db_get_all_settings() -> dict[str, str]:
+    return await _run(_sync_get_all_settings)
+
+
+async def db_upsert_settings(data: dict[str, str]) -> None:
+    await _run(_sync_upsert_settings, data)

@@ -21,6 +21,36 @@ async def startup():
     """
     await init_db()
 
+    # Restore settings from PostgreSQL (survives container rebuilds)
+    try:
+        from database import db_get_all_settings
+        from config import update_settings, settings as _s
+        from dataclasses import fields as _fields
+        db_settings = await db_get_all_settings()
+        if db_settings:
+            # Only apply settings that differ from current defaults
+            bool_fields = {f.name for f in _fields(_s) if f.type == "bool"}
+            int_fields = {f.name for f in _fields(_s) if f.type == "int"}
+            to_apply = {}
+            for k, v in db_settings.items():
+                current = getattr(_s, k, None)
+                if current is None:
+                    continue
+                if k in bool_fields:
+                    parsed = v.lower() in ("1", "true", "yes", "on")
+                    if parsed != current:
+                        to_apply[k] = v
+                elif k in int_fields:
+                    if int(v) != current:
+                        to_apply[k] = v
+                elif v != current:
+                    to_apply[k] = v
+            if to_apply:
+                await update_settings(to_apply)
+                logger.info(f"[DB] Restored {len(to_apply)} settings from PostgreSQL")
+    except Exception as exc:
+        logger.warning(f"[DB] Could not restore settings from PostgreSQL: {exc}")
+
     restored = await db_restore_task_store()
     task_store.update(restored)
 

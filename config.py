@@ -106,12 +106,14 @@ EDITABLE_FIELDS: dict[str, dict[str, Any]] = {
 
 
 def get_settings_dict() -> dict[str, Any]:
-    """Return current settings as a dict (sensitive fields masked)."""
+    """Return current settings as a dict (sensitive fields masked, Paths as strings)."""
     result = {}
     for f in fields(settings):
-        if f.name == "data_dir":
+        if f.name in ("data_dir", "models_dir"):
             continue
         value = getattr(settings, f.name)
+        if isinstance(value, Path):
+            value = str(value)
         if f.name in ("gemini_api_key", "deepl_api_key", "telegram_bot_token",
                        "omninet_password", "third_party_api_key"):
             # Mask sensitive fields
@@ -172,7 +174,7 @@ def _write_env(data: dict[str, str]) -> None:
 
 
 def update_settings(updates: dict[str, Any]) -> dict[str, Any]:
-    """Update settings in memory and persist to .env.
+    """Update settings in memory and persist to PostgreSQL (Docker) or .env (local).
 
     Returns the updated settings dict.
     """
@@ -194,10 +196,20 @@ def update_settings(updates: dict[str, Any]) -> dict[str, Any]:
     # Update in-memory settings
     settings = replace(settings, **kwargs)
 
-    # Persist to .env
-    env = _read_env()
-    env.update({k: str(v) for k, v in kwargs.items()})
-    _write_env(env)
+    # Persist to PostgreSQL if available, otherwise fall back to .env file
+    try:
+        from database import db_upsert_settings
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(db_upsert_settings({k: str(v) for k, v in kwargs.items()}))
+        else:
+            loop.run_until_complete(db_upsert_settings({k: str(v) for k, v in kwargs.items()}))
+    except Exception:
+        # Fallback: persist to .env file (local development)
+        env = _read_env()
+        env.update({k: str(v) for k, v in kwargs.items()})
+        _write_env(env)
 
     logger.info(f"Settings updated: {list(kwargs.keys())}")
     return get_settings_dict()
