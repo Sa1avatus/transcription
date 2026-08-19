@@ -10,10 +10,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
       DATA_DIRECTORY: /app/data
+      MODELS_DIRECTORY: /app/data/models
     ports:
       - "5000:5000"
     volumes:
       - app-data:/app/data
+      - models-data:/app/data/models
     depends_on:
       redis:
         condition: service_healthy
@@ -34,10 +36,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
       DATA_DIRECTORY: /app/data
+      MODELS_DIRECTORY: /app/data/models
     volumes:
       - app-data:/app/data
-      # Place Whisper/NLLB/Qwen files here; this keeps model artefacts out of the image.
-      - ${MODEL_DIRECTORY:-./models}:/app/data/models:ro
+      - models-data:/app/data/models
     depends_on:
       redis:
         condition: service_healthy
@@ -100,5 +102,6 @@ services:
 
 volumes:
   app-data:
+  models-data:
   redis-data:
   postgres-data:

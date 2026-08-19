@@ -86,7 +86,7 @@ _switch_lock = asyncio.Lock()
 # ---------------------------------------------------------------------------
 
 def _models_dir() -> Path:
-    return Path(BASE_PATH) / "models"
+    return Path(settings.models_dir)
 
 
 def _local_model_path(size: str) -> Path:

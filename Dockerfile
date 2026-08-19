@@ -8,7 +8,9 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 COPY requirements-db.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-db.txt
 COPY . .
-RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser:appuser /app
+RUN useradd --create-home appuser \
+    && mkdir -p /app/data /app/data/models \
+    && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 5000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]

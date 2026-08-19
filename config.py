@@ -31,6 +31,7 @@ def _bool(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path = Path(os.getenv("DATA_DIRECTORY", PROJECT_ROOT / "data"))
+    models_dir: Path = Path(os.getenv("MODELS_DIRECTORY", os.getenv("DATA_DIRECTORY", str(PROJECT_ROOT / "data")) + "/models"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "5000"))
