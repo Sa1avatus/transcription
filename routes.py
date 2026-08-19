@@ -16,6 +16,7 @@ from database import (
 )
 from translation import LANGUAGES, run_translate_sync
 from telegram_webapp import TelegramWebAppAuthError, validate_init_data
+import whisper_init
 
 app = Quart(__name__)
 app.config['MAX_CONTENT_LENGTH'] = settings.max_upload_mb * 1024 * 1024
@@ -260,3 +261,55 @@ async def list_translations(task_id: str):
             for language_code, language in LANGUAGES.items()
         },
     }), 200
+
+
+# =============================================================================
+# УПРАВЛЕНИЕ МОДЕЛЯМИ WHISPER
+# =============================================================================
+
+@app.route('/models', methods=['GET'])
+async def models_page():
+    """Web UI for managing Whisper models."""
+    return await render_template('models.html')
+
+
+@app.route('/api/models', methods=['GET'])
+async def api_list_models():
+    """Return list of all available Whisper models with status."""
+    info = whisper_init.get_model_info()
+    models = whisper_init.list_models()
+    return jsonify({"current": info, "models": models}), 200
+
+
+@app.route('/api/models/switch', methods=['POST'])
+async def api_switch_model():
+    """Switch the active Whisper model. Accepts JSON {"model_size": "large-v3"}."""
+    payload = await request.get_json(silent=True) or {}
+    model_size = payload.get("model_size") or payload.get("size")
+    if not model_size:
+        return jsonify({"error": "Provide 'model_size' in request body"}), 400
+
+    logger.info(f"API: model switch request to '{model_size}'")
+    result = await whisper_init.switch_model(model_size)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route('/api/models/download', methods=['POST'])
+async def api_download_model():
+    """Download a Whisper model from HuggingFace. Accepts JSON {"model_size": "large-v3"}."""
+    payload = await request.get_json(silent=True) or {}
+    model_size = payload.get("model_size") or payload.get("size")
+    if not model_size:
+        return jsonify({"error": "Provide 'model_size' in request body"}), 400
+
+    logger.info(f"API: model download request for '{model_size}'")
+    result = await whisper_init.download_model(model_size)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route('/api/models/info', methods=['GET'])
+async def api_model_info():
+    """Return current model metadata."""
+    return jsonify(whisper_init.get_model_info()), 200

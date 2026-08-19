@@ -6,7 +6,6 @@ from config import logger, settings
 from database import init_db
 from worker import worker
 
-
 async def initialise_models() -> None:
     """Load local models only in the worker process."""
     if not settings.load_local_models:
@@ -19,7 +18,7 @@ async def initialise_models() -> None:
 
     loop = asyncio.get_running_loop()
     if whisper_init.whisper_model is None:
-        whisper_init.whisper_model = await loop.run_in_executor(None, whisper_init._init_whisper_model)
+        whisper_init.startup_load()
     if translation.nllb_pipeline is None:
         translation.nllb_pipeline = await loop.run_in_executor(None, translation._init_translator)
     if settings.enable_qwen_correction and llm.qwen_model is None:

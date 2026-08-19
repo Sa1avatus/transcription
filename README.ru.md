@@ -80,7 +80,7 @@ docker compose --profile telegram up --build
 
 ### 5. Используйте NVIDIA GPU при наличии NVIDIA Container Toolkit
 
-GPU-профиль переключает worker на CUDA-образ, включает локальный NLLB-600M и выбирает Whisper `small`:
+GPU-профиль переключает worker на CUDA-образ, включает локальный NLLB-600M и выбирает Whisper `large-v3`:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
@@ -99,6 +99,38 @@ docker compose --profile telegram -f docker-compose.yml -f docker-compose.gpu.ym
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml build worker
 ```
+
+## Управление моделями Whisper
+
+Сервис включает веб-интерфейс для управления моделями Whisper по адресу `http://localhost:5000/models`.
+
+**Возможности:**
+- Просмотр текущей активной модели и её конфигурации (устройство, тип вычислений, статус CUDA)
+- Переключение между моделями без перезапуска контейнера
+- Загрузка новых моделей из HuggingFace Hub прямо из веб-интерфейса
+
+**Поддерживаемые модели:** tiny, base, small, medium, large-v1, large-v2, large-v3, distil-large-v2, distil-large-v3, distil-medium, distil-small
+
+**API-эндпоинты:**
+
+| Маршрут | Назначение |
+| --- | --- |
+| `GET /models` | Веб-интерфейс управления моделями |
+| `GET /api/models` | Список всех моделей со статусом (JSON) |
+| `GET /api/models/info` | Метаданные текущей модели |
+| `POST /api/models/switch` | Переключить активную модель (`{"model_size": "large-v3"}`) |
+| `POST /api/models/download` | Загрузить модель (`{"model_size": "large-v3"}`) |
+
+**Быстрый старт с large-v3:**
+```powershell
+# GPU-деплой с large-v3 (по умолчанию в docker-compose.gpu.yml)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+
+# Или переключитесь через UI после запуска
+# Перейдите на http://localhost:5000/models и нажмите "Download", затем "Switch"
+```
+
+Для CPU-деплоя large-v3 требует ~6 ГБ RAM. Рассмотрите `medium` или `distil-large-v3` для снижения потребления памяти.
 
 ## Telegram Mini App
 
@@ -130,7 +162,7 @@ WEBAPP_URL=https://stats.example.com/miniapp
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
 python app.py

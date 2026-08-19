@@ -8,5 +8,5 @@ services:
     environment:
       TRANSLATION_BACKEND: nllb_600m
       LOAD_LOCAL_MODELS: "true"
-      WHISPER_MODEL_SIZE: small
+      WHISPER_MODEL_SIZE: large-v3
       ENABLE_QWEN_CORRECTION: "false"

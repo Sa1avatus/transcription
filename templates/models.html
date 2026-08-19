@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Whisper Models</title>
+  <style>
+    :root{color-scheme:dark;--card:#152033;--muted:#94a3b8;--accent:#38bdf8;--ok:#34d399;--err:#fb7185;--warn:#fbbf24;--border:#26354d}
+    *{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:15px system-ui,sans-serif}
+    main{max-width:1000px;margin:0 auto;padding:48px 24px}
+    h1{margin:0 0 8px;font-size:28px} h2{margin:32px 0 16px;font-size:20px;color:var(--muted)}
+    p{color:var(--muted);margin:0 0 24px}
+    .back{color:var(--accent);text-decoration:none;font-size:14px} .back:hover{text-decoration:underline}
+
+    /* Current model card */
+    .current{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:32px}
+    .current h3{margin:0 0 16px;font-size:18px;color:var(--accent)}
+    .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px}
+    .info-item{background:#0d1829;border-radius:8px;padding:14px}
+    .info-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+    .info-value{font-size:20px;font-weight:700;color:var(--accent)}
+    .info-value.ok{color:var(--ok)} .info-value.err{color:var(--err)}
+
+    /* Model table */
+    .model-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden;margin-bottom:24px}
+    .model-table th,.model-table td{text-align:left;padding:14px 16px;border-bottom:1px solid var(--border)}
+    .model-table th{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.5px}
+    .model-table tr:last-child td{border-bottom:none}
+    .model-table tr:hover{background:#1a2a44}
+
+    /* Status badges */
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+    .badge-active{background:rgba(52,211,153,.15);color:var(--ok)}
+    .badge-downloaded{background:rgba(56,189,248,.15);color:var(--accent)}
+    .badge-available{background:rgba(148,163,184,.1);color:var(--muted)}
+
+    /* Buttons */
+    .btn{border:0;border-radius:8px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;transition:all .15s}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-primary{background:var(--accent);color:#0b1220} .btn-primary:hover:not(:disabled){background:#7dd3fc}
+    .btn-success{background:var(--ok);color:#0b1220} .btn-success:hover:not(:disabled){background:#6ee7b7}
+    .btn-danger{background:var(--err);color:#fff} .btn-danger:hover:not(:disabled){background:#fda4af}
+    .btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted)} .btn-outline:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+
+    /* Toast */
+    .toast{position:fixed;top:24px;right:24px;padding:14px 20px;border-radius:10px;font-weight:600;font-size:14px;z-index:999;opacity:0;transform:translateY(-10px);transition:all .3s;pointer-events:none}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .toast-ok{background:#065f46;color:#a7f3d0;border:1px solid #10b981}
+    .toast-err{background:#7f1d1d;color:#fecaca;border:1px solid #ef4444}
+    .toast-info{background:#1e3a5f;color:#bae6fd;border:1px solid #38bdf8}
+
+    /* Spinner */
+    .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.2);border-top-color:#0b1220;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Loading overlay */
+    .loading-overlay{position:fixed;inset:0;background:rgba(11,18,32,.85);display:flex;align-items:center;justify-content:center;z-index:1000;font-size:18px;color:var(--accent)}
+    .loading-overlay.hidden{display:none}
+    .loading-text{background:var(--card);padding:32px 48px;border-radius:16px;border:1px solid var(--border);text-align:center}
+    .loading-text .spinner-lg{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+  </style>
+</head>
+<body>
+  <a class="back" href="/">&larr; Dashboard</a>
+  <main>
+    <h1>🎙️ Whisper Models</h1>
+    <p>Manage speech recognition models. Switch, download, or check status.</p>
+
+    <!-- Current model info -->
+    <div class="current">
+      <h3>Active Model</h3>
+      <div class="info-grid" id="info-grid">
+        <div class="info-item"><div class="info-label">Model</div><div class="info-value" id="info-model">—</div></div>
+        <div class="info-item"><div class="info-label">Device</div><div class="info-value" id="info-device">—</div></div>
+        <div class="info-item"><div class="info-label">Compute</div><div class="info-value" id="info-compute">—</div></div>
+        <div class="info-item"><div class="info-label">CUDA GPUs</div><div class="info-value" id="info-cuda">—</div></div>
+        <div class="info-item"><div class="info-label">Loaded</div><div class="info-value" id="info-loaded">—</div></div>
+        <div class="info-item"><div class="info-label">Uptime</div><div class="info-value" id="info-uptime">—</div></div>
+      </div>
+    </div>
+
+    <!-- Models table -->
+    <h2>Available Models</h2>
+    <table class="model-table">
+      <thead>
+        <tr><th>Model</th><th>Status</th><th>Disk Size</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="models-body"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+    </table>
+    <button class="btn btn-outline" id="refresh-btn" onclick="loadModels()">↻ Refresh</button>
+  </main>
+
+  <!-- Loading overlay for switch/download -->
+  <div class="loading-overlay hidden" id="loading-overlay">
+    <div class="loading-text">
+      <div class="spinner-lg"></div>
+      <div id="loading-msg">Processing…</div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+
+function toast(msg,type='info'){
+  const t=$('toast');t.textContent=msg;t.className='toast toast-'+type+' show';
+  setTimeout(()=>t.classList.remove('show'),4000);
+}
+
+function showLoading(msg){$('loading-msg').textContent=msg;$('loading-overlay').classList.remove('hidden')}
+function hideLoading(){$('loading-overlay').classList.add('hidden')}
+
+async function loadModels(){
+  try{
+    const r=await fetch('/api/models');if(!r.ok)throw Error(r.statusText);
+    const d=await r.json();
+    // Update info panel
+    const info=d.current||{};
+    $('info-model').textContent=info.model_size||'—';
+    $('info-device').textContent=(info.device||'—').toUpperCase();
+    $('info-compute').textContent=info.compute_type||'—';
+    $('info-cuda').textContent=info.cuda_devices??'—';
+    const loaded=info.loaded;
+    $('info-loaded').textContent=loaded?'✓ Yes':'✗ No';
+    $('info-loaded').className='info-value '+(loaded?'ok':'err');
+    $('info-uptime').textContent=info.load_time_s!=null?formatUptime(info.load_time_s):'—';
+    // Render models table
+    const models=d.models||[];
+    $('models-body').innerHTML=models.map(m=>{
+      let badge,statusCol,actions;
+      if(m.active){badge='<span class="badge badge-active">● Active</span>';actions=''}
+      else if(m.downloaded){badge='<span class="badge badge-downloaded">↓ Downloaded</span>';actions=`<button class="btn btn-primary" onclick="switchModel('${esc(m.size)}')">Switch</button>`}
+      else{badge='<span class="badge badge-available">Available</span>';actions=`<button class="btn btn-success" onclick="downloadModel('${esc(m.size)}')">Download</button>`}
+      return `<tr><td><strong>${esc(m.size)}</strong></td><td>${badge}</td><td>${esc(m.disk_size)}</td><td>${actions}</td></tr>`;
+    }).join('')||'<tr><td colspan="4" style="color:var(--muted)">No models found.</td></tr>';
+  }catch(e){$('models-body').innerHTML='<tr><td colspan="4" style="color:var(--err)">Failed to load models.</td></tr>';}
+}
+
+function formatUptime(s){
+  if(s<60)return Math.round(s)+'s';
+  if(s<3600)return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
+  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
+
+async function switchModel(size){
+  if(!confirm(`Switch active model to "${size}"?\nThis will unload the current model and load the new one. It may take a moment.`))return;
+  showLoading(`Switching to ${size}…`);
+  try{
+    const r=await fetch('/api/models/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_size:size})});
+    const d=await r.json();
+    hideLoading();
+    if(d.ok){toast(d.message||`Switched to ${size}`,'ok');loadModels();}
+    else toast(d.error||'Switch failed','err');
+  }catch(e){hideLoading();toast('Network error: '+e.message,'err');}
+}
+
+async function downloadModel(size){
+  if(!confirm(`Download model "${size}"?\nThis may take several minutes depending on your connection.`))return;
+  showLoading(`Downloading ${size}… This may take a few minutes.`);
+  try{
+    const r=await fetch('/api/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_size:size})});
+    const d=await r.json();
+    hideLoading();
+    if(d.ok){toast(d.message||`Downloaded ${size}`,'ok');loadModels();}
+    else toast(d.error||'Download failed','err');
+  }catch(e){hideLoading();toast('Network error: '+e.message,'err');}
+}
+
+loadModels();
+setInterval(loadModels,30000);
+</script>
+</body></html>

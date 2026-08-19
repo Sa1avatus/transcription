@@ -80,7 +80,7 @@ The profile adds the `bot` container. One Telegram token must be served by exact
 
 ### 5. Use an NVIDIA GPU
 
-After installing NVIDIA Container Toolkit, the GPU override switches the worker to a CUDA image, enables local NLLB-600M, and selects Whisper `small`:
+After installing NVIDIA Container Toolkit, the GPU override switches the worker to a CUDA image, enables local NLLB-600M, and selects Whisper `large-v3`:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
@@ -99,6 +99,38 @@ If a worker build is interrupted, rebuild only the worker without `--no-cache`; 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml build worker
 ```
+
+## Whisper Model Management
+
+The service includes a web interface for managing Whisper models at `http://localhost:5000/models`.
+
+**Features:**
+- View the currently active model and its configuration (device, compute type, CUDA status)
+- Switch between models at runtime without restarting the container
+- Download new models from HuggingFace Hub directly from the UI
+
+**Supported models:** tiny, base, small, medium, large-v1, large-v2, large-v3, distil-large-v2, distil-large-v3, distil-medium, distil-small
+
+**API endpoints:**
+
+| Route | Purpose |
+| --- | --- |
+| `GET /models` | Web UI for model management |
+| `GET /api/models` | List all models with status (JSON) |
+| `GET /api/models/info` | Get current model metadata |
+| `POST /api/models/switch` | Switch active model (`{"model_size": "large-v3"}`) |
+| `POST /api/models/download` | Download a model (`{"model_size": "large-v3"}`) |
+
+**Quick start with large-v3:**
+```powershell
+# GPU deployment with large-v3 (default in docker-compose.gpu.yml)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+
+# Or switch via UI after startup
+# Navigate to http://localhost:5000/models and click "Download" then "Switch"
+```
+
+For CPU-only deployments, large-v3 requires ~6 GB RAM. Consider using `medium` or `distil-large-v3` for lower memory usage.
 
 ## Telegram Mini App
 
@@ -130,7 +162,7 @@ For API-only development:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
 python app.py
