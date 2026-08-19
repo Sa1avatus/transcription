@@ -1,14 +1,14 @@
 # Commands
 
-Run commands from `transcription/` in PowerShell.
+Run commands from `transcription/` in PowerShell or bash.
 
 ## Lightweight API-only setup
 
-```powershell
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-Copy-Item .env.example .env
+cp .env.example .env      # fill in your secrets
 python app.py
 ```
 
@@ -16,7 +16,7 @@ API-only mode does not process queued transcription work without a worker.
 
 ## Local embedded worker
 
-```powershell
+```bash
 pip install -r requirements-worker.txt
 python app.py
 ```
@@ -25,7 +25,7 @@ Optional local translation or correction dependencies are split across `requirem
 
 ## Verification
 
-```powershell
+```bash
 pip install -r requirements-dev.txt
 python -m compileall .
 pytest -q
@@ -33,17 +33,61 @@ pytest -q
 
 ## Docker Compose
 
-```powershell
-docker compose up --build
-docker compose --profile telegram up --build
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```bash
+# CPU mode: API + worker + Redis + PostgreSQL
+docker compose up -d --build
+
+# With Telegram bot (+ local Bot API server for >20MB files)
+docker compose --profile telegram up -d --build
+
+# GPU mode (requires nvidia-container-toolkit)
+docker compose up -d --build worker
 ```
 
-For repeat GPU builds, build only the worker and preserve Docker cache:
+GPU is automatic: `Dockerfile.worker` uses `nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04` base and `deploy.resources.reservations.devices` requests the GPU.
 
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml build worker
+### Telegram Bot API local server
+
+For files >20 MB via Telegram, the compose includes a self-hosted `aiogram/telegram-bot-api` service. Requires in `.env`:
+
+```dotenv
+TELEGRAM_API_ID=your_app_id
+TELEGRAM_API_HASH=your_app_hash
 ```
+
+Get these from https://my.telegram.org/apps.
+
+### Model management
+
+```bash
+# Download a model via API
+curl -X POST http://localhost:5000/api/models/download \
+  -H 'Content-Type: application/json' \
+  -d '{"model_size": "large-v3"}'
+
+# Switch model
+curl -X POST http://localhost:5000/api/models/switch \
+  -H 'Content-Type: application/json' \
+  -d '{"model_size": "large-v3"}'
+
+# Check model status
+curl http://localhost:5000/api/models
+```
+
+Or use the web UI at http://localhost:5000/models.
+
+### Settings management
+
+```bash
+# Get current settings (sensitive fields masked)
+curl http://localhost:5000/api/settings
+
+# Update settings (persisted to PostgreSQL)
+curl -X POST http://localhost:5000/api/settings \
+  -H 'Content-Type: application/json' \
+  -d '{"translation_backend": "gemini", "gemini_model": "gemini-2.5-flash"}'
+```
+
+Or use the web UI at http://localhost:5000/settings.
 
 Do not add `--no-cache` routinely; ML dependency layers are large. Do not commit `.env`, `data/`, or `models/`.
-
