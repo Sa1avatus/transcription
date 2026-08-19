@@ -76,15 +76,20 @@ services:
 
   telegram-bot-api:
     profiles: [telegram]
-    image: ghcr.io/tdlib/telegram-bot-api:latest
+    image: aiogram/telegram-bot-api:latest
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
-    command: ["--local", "--http-port", "8081"]
+      TELEGRAM_LOCAL: "true"
     ports:
       - "127.0.0.1:8081:8081"
     volumes:
       - telegram-bot-api-data:/var/lib/telegram-bot-api
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   miniapp-gateway:
     profiles: [telegram]
