@@ -1,9 +1,9 @@
 import os
 import traceback
-import torch
+import ctranslate2
 from faster_whisper import WhisperModel
 
-from config import BASE_PATH, logger
+from config import BASE_PATH, logger, settings
 
 # Глобальная ссылка — заполняется в startup()
 whisper_model: WhisperModel | None = None
@@ -11,20 +11,15 @@ whisper_model: WhisperModel | None = None
 
 def _init_whisper_model() -> WhisperModel:
     """Загружает модель Whisper (вызывается один раз при старте в executor)."""
-    model_path = os.path.join(BASE_PATH, "models", "medium")
-    model_ref = model_path if os.path.isdir(model_path) else "medium"
+    model_path = os.path.join(BASE_PATH, "models", settings.whisper_model_size)
+    model_ref = model_path if os.path.isdir(model_path) else settings.whisper_model_size
     local_only = os.path.isdir(model_path)
 
-    # Диагностика torch / CUDA
-    logger.info(f"Whisper INIT: torch version = {torch.__version__}")
-    logger.info(f"Whisper INIT: CUDA available = {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        logger.info(f"Whisper INIT: GPU = {torch.cuda.get_device_name(0)}")
-        logger.info(
-            f"Whisper INIT: VRAM = {torch.cuda.get_device_properties(0).total_memory // 1024 ** 2} MB"
-        )
+    # faster-whisper runs on CTranslate2 and does not require PyTorch.
+    cuda_available = ctranslate2.get_cuda_device_count() > 0
+    logger.info(f"Whisper INIT: CTranslate2 CUDA devices = {ctranslate2.get_cuda_device_count()}")
 
-    if torch.cuda.is_available():
+    if cuda_available:
         device, compute_type = "cuda", "float16"
     else:
         device, compute_type = "cpu", "int8"

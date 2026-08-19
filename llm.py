@@ -8,11 +8,11 @@ llm.py — локальная LLM Qwen2.5-0.5B-Instruct (GGUF) через llama-
 Модель загружается один раз при старте в глобальный qwen_model.
 """
 
+from __future__ import annotations
+
 import os
 import traceback
 from typing import Optional
-
-from llama_cpp import Llama
 
 from config import BASE_PATH, logger
 
@@ -34,14 +34,15 @@ MAX_TOKENS_TRANSLATION = 1024
 CHUNK_CHARS = 1500
 
 # Глобальная ссылка — заполняется в startup()
-qwen_model: Optional[Llama] = None
+qwen_model: Optional[object] = None
 
 
 # =============================================================================
 # ИНИЦИАЛИЗАЦИЯ
 # =============================================================================
 
-def _init_qwen() -> Llama:
+def _init_qwen():
+    from llama_cpp import Llama
     if not os.path.isfile(MODEL_PATH):
         raise FileNotFoundError(
             f"Модель Qwen не найдена: {MODEL_PATH}\n"
@@ -123,23 +124,21 @@ def correct_transcript(text: str) -> str:
     try:
         logger.info(f"Qwen correction: символов={len(text)}")
         chunks   = _split_chunks(text, CHUNK_CHARS)
-        results: list[str] = []
+        corrected_chunks: list[str] = []
 
-        for i, chunk in enumerate(chunks, 1):
-            logger.info(f"Qwen correction: чанк {i}/{len(chunks)}")
+        for chunk_number, chunk in enumerate(chunks, 1):
+            logger.info(f"Qwen correction: чанк {chunk_number}/{len(chunks)}")
             corrected = _chat(
                 system=SYSTEM_CORRECTION,
                 user=f"Fix ASR errors in the following transcription:\n\n{chunk}",
                 max_tokens=MAX_TOKENS_CORRECTION,
             )
-            results.append(corrected)
+            corrected_chunks.append(corrected)
 
-        result = "\n".join(results)
+        corrected_text = "\n".join(corrected_chunks)
         logger.info("Qwen correction: завершено")
-        return result
+        return corrected_text
 
     except Exception:
         logger.error(f"Qwen correction error:\n{traceback.format_exc()}")
         return text   # возвращаем оригинал при ошибке
-
-

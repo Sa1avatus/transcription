@@ -7,9 +7,7 @@ import traceback
 from typing import List
 
 import httpx
-import settings
-
-from config import TMP_DIR, logger
+from config import TMP_DIR, logger, settings
 
 
 # =============================================================================
@@ -35,14 +33,17 @@ async def fetch_omninet_audio(uid: str) -> List[str]:
     headers = {
         'Content-Type': 'application/soap+xml; charset=utf-8; action="http://omninet.de/InvokeScript"'
     }
-    auth = (settings.OT_CONNECTOR_LOGIN, settings.OT_CONNECTOR_PWD)
+    if not all((settings.omninet_url, settings.omninet_login, settings.omninet_password)):
+        logger.warning("OMNINET integration is not configured")
+        return temp_files
+    auth = (settings.omninet_login, settings.omninet_password)
     temp_files: List[str] = []
 
     try:
         logger.info(f"--- [OMNINET FETCH] Запрос аудио UID={uid}")
-        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+        async with httpx.AsyncClient(verify=settings.internal_tls_verify, timeout=120.0) as client:
             response = await client.post(
-                settings.OT_WS_URL,
+                settings.omninet_url,
                 content=soap_body.encode('utf-8'),
                 headers=headers,
                 auth=auth,
@@ -60,7 +61,7 @@ async def fetch_omninet_audio(uid: str) -> List[str]:
 
         logger.info(f"--- [OMNINET FETCH] Найдено потенциальных блоков аудио: {len(raw_matches)}")
 
-        for i, raw_data in enumerate(raw_matches):
+        for block_index, raw_data in enumerate(raw_matches):
             try:
                 b64_clean = re.sub(r'[^A-Za-z0-9+/=]', '', "".join(raw_data.split()))
                 missing = len(b64_clean) % 4
@@ -74,11 +75,11 @@ async def fetch_omninet_audio(uid: str) -> List[str]:
                     or file_bytes.startswith(b'ID3')
                     or file_bytes.startswith(b'\xff\xfb')
                 ):
-                    tmp_path = os.path.join(TMP_DIR, f"omni_{uid}_{i}_{uuid.uuid4().hex[:4]}.wav")
-                    with open(tmp_path, "wb") as f:
-                        f.write(file_bytes)
-                    temp_files.append(tmp_path)
-                    logger.info(f"--- [OMNINET FETCH] Сохранено аудио блок {i + 1}")
+                    temporary_path = os.path.join(TMP_DIR, f"omni_{uid}_{block_index}_{uuid.uuid4().hex[:4]}.wav")
+                    with open(temporary_path, "wb") as audio_file:
+                        audio_file.write(file_bytes)
+                    temp_files.append(temporary_path)
+                    logger.info(f"--- [OMNINET FETCH] Сохранено аудио блок {block_index + 1}")
 
                 del file_bytes
             except Exception:
@@ -119,13 +120,16 @@ async def send_soap_callback(uid: str, text: str) -> None:
     headers = {
         'Content-Type': 'application/soap+xml; charset=utf-8; action="http://omninet.de/InvokeScript"'
     }
-    auth = (settings.OT_CONNECTOR_LOGIN, settings.OT_CONNECTOR_PWD)
+    if not all((settings.omninet_url, settings.omninet_login, settings.omninet_password)):
+        logger.warning("OMNINET integration is not configured; callback skipped")
+        return
+    auth = (settings.omninet_login, settings.omninet_password)
 
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(verify=settings.internal_tls_verify) as client:
         try:
             logger.info(f"--- [CALLBACK] Отправка SOAP для UID {uid}")
             response = await client.post(
-                settings.OT_WS_URL,
+                settings.omninet_url,
                 content=soap_body.encode('utf-8'),
                 headers=headers,
                 auth=auth,

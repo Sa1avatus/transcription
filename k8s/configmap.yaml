@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transcription-config
+data:
+  REDIS_URL: redis://redis:6379/0
+  DATA_DIRECTORY: /app/data
+  RUN_EMBEDDED_WORKER: "false"
+  ENABLE_TELEGRAM_BOT: "false"
+  LOAD_LOCAL_MODELS: "true"
+  WHISPER_MODEL_SIZE: small
+  TRANSLATION_BACKEND: nllb_600m
+  ENABLE_QWEN_CORRECTION: "false"
+  LOG_LEVEL: INFO
+  # Public HTTPS address of the Mini App; replace before production deployment.
+  WEBAPP_URL: ""

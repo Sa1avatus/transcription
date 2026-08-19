@@ -1,0 +1,8 @@
+.env
+k8s/secret.yaml
+data/
+models/
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/

@@ -1,27 +1,21 @@
 """
 translation.py — перевод с поддержкой трёх бэкендов.
 
-Бэкенд выбирается через settings.TRANSLATION_BACKEND:
+Бэкенд выбирается через переменную окружения TRANSLATION_BACKEND:
   "nllb_600m"   — facebook/nllb-200-distilled-600M  (локально, ~1.2 ГБ VRAM)
   "nllb_1300m"  — facebook/nllb-200-1.3B            (локально, ~2.5 ГБ VRAM)
-  "deepl"       — DeepL API (требует settings.DEEPL_API_KEY, 500к символов/мес бесплатно)
-
-Добавить в settings.py:
-  TRANSLATION_BACKEND = "nllb_600m"   # или "nllb_1300m" / "deepl"
-  DEEPL_API_KEY       = "xxxxxxxx-...-...-...-xxxxxxxxxxxx:fx"  # только для deepl
+  "deepl"       — DeepL API (требует переменную окружения DEEPL_API_KEY)
 """
+
+from __future__ import annotations
 
 import os
 import re
-import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-import torch
 import httpx
-import settings
-
-from config import BASE_PATH, logger
+from config import BASE_PATH, logger, settings
 
 # =============================================================================
 # КОНСТАНТЫ
@@ -83,8 +77,8 @@ class BaseTranslator(ABC):
         SEP = " | "
         translated: list[str] = []
 
-        for i in range(0, len(lines), LINES_PER_GROUP):
-            group = lines[i: i + LINES_PER_GROUP]
+        for offset in range(0, len(lines), LINES_PER_GROUP):
+            group = lines[offset: offset + LINES_PER_GROUP]
             joined = SEP.join(group)
 
             out   = self.translate_text(joined, src_lang, tgt_lang)
@@ -112,6 +106,11 @@ class NllbTranslator(BaseTranslator):
         self.device    = device
 
     def translate_text(self, text: str, src_lang: str, tgt_lang: str) -> str:
+        # ``translation`` is also imported by the lightweight bot image, where
+        # PyTorch is intentionally absent.  Keep this import on the NLLB-only
+        # execution path rather than importing it at module load time.
+        import torch
+
         self.tokenizer.src_lang = src_lang
         inputs = self.tokenizer(
             text,
@@ -135,6 +134,7 @@ class NllbTranslator(BaseTranslator):
 
 
 def _init_nllb(backend: str) -> NllbTranslator:
+    import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
     model_name  = NLLB_MODELS[backend]
@@ -157,7 +157,9 @@ def _init_nllb(backend: str) -> NllbTranslator:
         os.makedirs(local_path, exist_ok=True)
         logger.info(f"NLLB INIT [{backend}]: скачиваем '{model_name}' → {local_path} ...")
 
-    tokenizer = AutoTokenizer.from_pretrained(source, **extra)
+    # Older local NLLB configs store this field as a list, while recent
+    # Transformers expects a mapping in the fast tokenizer constructor.
+    tokenizer = AutoTokenizer.from_pretrained(source, extra_special_tokens={}, **extra)
     model = (
         AutoModelForSeq2SeqLM
         .from_pretrained(source, dtype=dtype, **extra)
@@ -193,16 +195,16 @@ class DeepLTranslator(BaseTranslator):
         logger.info(f"DeepL INIT: {'free' if api_key.endswith(':fx') else 'paid'} plan, url={self.url}")
 
     def _nllb_to_deepl(self, nllb_code: str, as_target: bool = False) -> str:
-        info = LANGUAGES.get(nllb_code)
-        if not info:
+        language = LANGUAGES.get(nllb_code)
+        if not language:
             raise ValueError(f"Неизвестный язык: {nllb_code}")
-        return info.deepl_tgt if as_target else info.deepl_src
+        return language.deepl_tgt if as_target else language.deepl_src
 
     def translate_text(self, text: str, src_lang: str, tgt_lang: str) -> str:
         src = self._nllb_to_deepl(src_lang, as_target=False)
         tgt = self._nllb_to_deepl(tgt_lang, as_target=True)
 
-        resp = httpx.post(
+        response = httpx.post(
             self.url,
             headers={"Authorization": f"DeepL-Auth-Key {self.api_key}"},
             json={
@@ -211,10 +213,9 @@ class DeepLTranslator(BaseTranslator):
                 "target_lang": tgt,
             },
             timeout=30.0,
-            verify=False,
         )
-        resp.raise_for_status()
-        return resp.json()["translations"][0]["text"]
+        response.raise_for_status()
+        return response.json()["translations"][0]["text"]
 
     def translate_lines(self, lines: list[str], src_lang: str, tgt_lang: str) -> list[str]:
         """
@@ -225,11 +226,11 @@ class DeepLTranslator(BaseTranslator):
         tgt = self._nllb_to_deepl(tgt_lang, as_target=True)
 
         # DeepL принимает до 50 строк за раз
-        results: list[str] = []
+        translated_lines: list[str] = []
         BATCH = 50
-        for i in range(0, len(lines), BATCH):
-            batch = lines[i: i + BATCH]
-            resp = httpx.post(
+        for offset in range(0, len(lines), BATCH):
+            batch = lines[offset: offset + BATCH]
+            response = httpx.post(
                 self.url,
                 headers={"Authorization": f"DeepL-Auth-Key {self.api_key}"},
                 json={
@@ -238,18 +239,17 @@ class DeepLTranslator(BaseTranslator):
                     "target_lang": tgt,
                 },
                 timeout=60.0,
-                verify=False,
             )
-            resp.raise_for_status()
-            results.extend(t["text"] for t in resp.json()["translations"])
+            response.raise_for_status()
+            translated_lines.extend(translation["text"] for translation in response.json()["translations"])
 
-        return results
+        return translated_lines
 
 
 def _init_deepl() -> DeepLTranslator:
-    api_key = getattr(settings, "DEEPL_API_KEY", "")
+    api_key = settings.deepl_api_key
     if not api_key:
-        raise ValueError("DEEPL_API_KEY не задан в settings.py")
+        raise ValueError("DEEPL_API_KEY is not configured")
     return DeepLTranslator(api_key)
 
 
@@ -274,29 +274,28 @@ class GeminiTranslator(BaseTranslator):
         logger.info(f"Gemini INIT: модель={model}")
 
     def _lang_label(self, nllb_code: str) -> str:
-        info = LANGUAGES.get(nllb_code)
-        return info.label if info else nllb_code
+        language = LANGUAGES.get(nllb_code)
+        return language.label if language else nllb_code
 
     def _call(self, prompt: str) -> str:
         import time
         delays = [5, 15, 30]   # секунд между попытками при 429 или обрыве
         for attempt, delay in enumerate(delays + [None], 1):
             try:
-                resp = httpx.post(
+                response = httpx.post(
                     self.url,
                     params={"key": self.api_key},
                     json={"contents": [{"parts": [{"text": prompt}]}]},
                     timeout=60.0,
-                    verify=False,
                 )
-                if resp.status_code == 429:
+                if response.status_code == 429:
                     if delay is None:
-                        resp.raise_for_status()
+                        response.raise_for_status()
                     logger.warning(f"Gemini 429: попытка {attempt}, ждём {delay}с...")
                     time.sleep(delay)
                     continue
-                resp.raise_for_status()
-                return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                response.raise_for_status()
+                return response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as e:
                 if delay is None:
                     raise
@@ -322,7 +321,7 @@ class GeminiTranslator(BaseTranslator):
         src_label = self._lang_label(src_lang)
         tgt_label = self._lang_label(tgt_lang)
 
-        numbered = "\n".join(f"{i+1}. {line}" for i, line in enumerate(lines))
+        numbered = "\n".join(f"{line_number}. {line}" for line_number, line in enumerate(lines, 1))
         prompt = (
             f"You are translating a phone call transcript from {src_label} to {tgt_label}.\n"
             f"Translate each numbered line. Keep the same numbering. "
@@ -333,7 +332,7 @@ class GeminiTranslator(BaseTranslator):
         raw = self._call(prompt)
 
         # Парсим пронумерованный ответ
-        result: list[str] = []
+        translated_lines: list[str] = []
         for line in raw.splitlines():
             line = line.strip()
             if not line:
@@ -341,23 +340,23 @@ class GeminiTranslator(BaseTranslator):
             # Убираем номер "1. ", "1) ", "1- " и т.п.
             cleaned = re.sub(r'^\d+[.)\-]\s*', '', line)
             if cleaned:
-                result.append(cleaned)
+                translated_lines.append(cleaned)
 
         # Если количество не совпало — возвращаем как есть
-        if len(result) != len(lines):
+        if len(translated_lines) != len(lines):
             logger.warning(
-                f"Gemini: ожидалось {len(lines)} строк, получено {len(result)} — возвращаем блоком"
+                f"Gemini: ожидалось {len(lines)} строк, получено {len(translated_lines)} — возвращаем блоком"
             )
             return [raw]
 
-        return result
+        return translated_lines
 
 
 def _init_gemini() -> GeminiTranslator:
-    api_key = getattr(settings, "GEMINI_API_KEY", "")
+    api_key = settings.gemini_api_key
     if not api_key:
-        raise ValueError("GEMINI_API_KEY не задан в settings.py")
-    model = getattr(settings, "GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+        raise ValueError("GEMINI_API_KEY is not configured")
+    model = settings.gemini_model
     return GeminiTranslator(api_key, model)
 
 
@@ -366,7 +365,7 @@ def _init_gemini() -> GeminiTranslator:
 # =============================================================================
 
 def _init_translator() -> BaseTranslator:
-    backend = getattr(settings, "TRANSLATION_BACKEND", "nllb_600m").lower()
+    backend = settings.translation_backend.lower()
     logger.info(f"Translation INIT: бэкенд = '{backend}'")
 
     if backend in ("nllb_600m", "nllb_1300m"):
@@ -401,12 +400,16 @@ def _strip_timestamps(text: str) -> list[str]:
 # ПУБЛИЧНАЯ ФУНКЦИЯ
 # =============================================================================
 
+class TranslationError(RuntimeError):
+    """A translation failure safe to expose through an application boundary."""
+
+
 def run_translate_sync(text: str, src_lang: str, tgt_lang: str) -> str:
     """Синхронный перевод (запускается через run_in_executor)."""
     if not src_lang or src_lang == tgt_lang:
         src_lang = DEFAULT_SRC_LANG
     try:
-        backend_name = getattr(settings, "TRANSLATION_BACKEND", "nllb_600m")
+        backend_name = settings.translation_backend
         logger.info(f"[{backend_name}] перевод {src_lang} → {tgt_lang}, символов={len(text)}")
 
         lines = _strip_timestamps(text)
@@ -414,12 +417,12 @@ def run_translate_sync(text: str, src_lang: str, tgt_lang: str) -> str:
             return "Нет текста для перевода."
 
         translated = nllb_pipeline.translate_lines(lines, src_lang, tgt_lang)
-        result = "\n".join(translated)
+        translated_text = "\n".join(translated)
 
         logger.info(f"[{backend_name}] перевод завершён, строк={len(translated)}")
-        return result
+        return translated_text
 
-    except Exception:
-        err = traceback.format_exc()
-        logger.error(f"Translation error:\n{err}")
-        return f"Translation Error: {err}"
+    except Exception as exc:
+        # The traceback belongs in the service logs, never in a user message.
+        logger.exception("Translation error")
+        raise TranslationError("Не удалось выполнить перевод.") from exc

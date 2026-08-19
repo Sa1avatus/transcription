@@ -1,15 +1,14 @@
 """
 gemini_vision.py — анализ изображений через Gemini Vision API.
 
-Используется тот же ключ что и для перевода (settings.GEMINI_API_KEY).
+Используется тот же ключ что и для перевода (GEMINI_API_KEY из окружения).
 Gemini 2.0 Flash поддерживает изображения нативно.
 """
 
 import base64
 import traceback
 import httpx
-import settings
-from config import logger
+from config import logger, settings
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_DEFAULT_VISION_MODEL = "gemini-2.5-flash"
@@ -42,11 +41,11 @@ def analyze_image_sync(
     Запускается через run_in_executor.
     caption — подпись пользователя из Telegram, учитывается в промпте.
     """
-    api_key = getattr(settings, "GEMINI_API_KEY", "")
+    api_key = settings.gemini_api_key
     if not api_key:
-        return "❌ GEMINI_API_KEY не задан в settings.py"
+        return "❌ GEMINI_API_KEY is not configured"
 
-    model = getattr(settings, "GEMINI_VISION_MODEL", None) or getattr(settings, "GEMINI_MODEL", GEMINI_DEFAULT_VISION_MODEL)
+    model = settings.gemini_vision_model or settings.gemini_model or GEMINI_DEFAULT_VISION_MODEL
     url   = GEMINI_URL.format(model=model)
     b64   = base64.b64encode(image_bytes).decode("utf-8")
     prompt = ANALYZE_PROMPT_WITH_CAPTION.format(caption=caption) if caption else ANALYZE_PROMPT
@@ -64,22 +63,21 @@ def analyze_image_sync(
     delays = [5, 15, 30]
     for attempt, delay in enumerate(delays + [None], 1):
         try:
-            resp = httpx.post(
+            response = httpx.post(
                 url,
                 params={"key": api_key},
                 json=payload,
                 timeout=60.0,
-                verify=False,
             )
-            if resp.status_code == 429:
+            if response.status_code == 429:
                 if delay is None:
                     return f"❌ Gemini: слишком много запросов (429). Попробуйте позже."
                 logger.warning(f"Gemini Vision 429: попытка {attempt}, ждём {delay}с...")
                 time.sleep(delay)
                 continue
 
-            resp.raise_for_status()
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            response.raise_for_status()
+            return response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Gemini Vision HTTP error: {e}")

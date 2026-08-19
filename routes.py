@@ -5,19 +5,61 @@ import base64
 import traceback
 from typing import Optional
 
-from quart import Quart, request, jsonify
+from quart import Quart, request, jsonify, render_template
 
-from config import TMP_DIR, logger
+from config import TMP_DIR, logger, settings
 from storage import task_store, task_queue, store_put
 from database import (
     db_insert_task, db_get_task, db_all_tasks,
     db_get_translation, db_upsert_translation, db_get_all_translations,
+    db_get_user_statistics,
 )
 from translation import LANGUAGES, run_translate_sync
+from telegram_webapp import TelegramWebAppAuthError, validate_init_data
 
 app = Quart(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = settings.max_upload_mb * 1024 * 1024
 app.json.ensure_ascii = False
+
+
+@app.route('/', methods=['GET'])
+async def dashboard():
+    """Small operational dashboard for demos and local support."""
+    return await render_template('index.html')
+
+
+@app.route('/miniapp', methods=['GET'])
+async def miniapp():
+    """Telegram Mini App shell; data is loaded only after signed auth."""
+    return await render_template('miniapp.html')
+
+
+@app.route('/api/miniapp/stats', methods=['POST'])
+async def miniapp_statistics():
+    """Return personal statistics for a signed Telegram Mini App session."""
+    payload = await request.get_json(silent=True) or {}
+    init_data = payload.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+    try:
+        launch = validate_init_data(
+            init_data,
+            settings.telegram_bot_token,
+            settings.webapp_auth_max_age_seconds,
+        )
+    except TelegramWebAppAuthError:
+        logger.warning("Rejected Telegram Mini App statistics request")
+        return jsonify({"error": "Telegram authorization failed"}), 401
+
+    user = launch["user"]
+    statistics = await db_get_user_statistics(str(user["id"]))
+    return jsonify({
+        "user": {"id": user["id"], "first_name": user.get("first_name", "")},
+        "statistics": statistics,
+    })
+
+
+@app.route('/health', methods=['GET'])
+async def health():
+    return jsonify({"status": "ok", "service": "transcription-service"}), 200
 
 
 # =============================================================================
@@ -35,12 +77,12 @@ async def handle_transcription():
       3. JSON с полем 'uid' / 'UID'  — режим OMNINET
     """
     try:
-        data = await request.get_json(silent=True) or {}
+        request_payload = await request.get_json(silent=True) or {}
         form = await request.form
         files = await request.files
 
         uid: Optional[str] = (
-            data.get('uid') or data.get('UID')
+            request_payload.get('uid') or request_payload.get('UID')
             or form.get('uid') or form.get('UID')
             or None
         )
@@ -55,10 +97,10 @@ async def handle_transcription():
             is_temp = True
             logger.info(f"File upload received: {audio_path}, uid={uid}")
 
-        elif 'base64_data' in data:
+        elif 'base64_data' in request_payload:
             audio_path = os.path.join(TMP_DIR, f"b64_{uuid.uuid4().hex}.tmp")
             with open(audio_path, "wb") as f:
-                f.write(base64.b64decode(data['base64_data'].split(',')[-1]))
+                f.write(base64.b64decode(request_payload['base64_data'].split(',')[-1]))
             is_temp = True
             logger.info(f"Base64 upload received: {audio_path}, uid={uid}")
 
@@ -90,7 +132,7 @@ async def handle_transcription():
 @app.route('/task/<task_id>', methods=['GET'])
 async def get_task_result(task_id: str):
     """Статус и результат задачи. Сначала кэш, потом БД."""
-    entry = task_store.get(task_id) or await db_get_task(task_id)
+    entry = await db_get_task(task_id) or task_store.get(task_id)
     if entry is None:
         return jsonify({"error": "Task not found"}), 404
 
@@ -160,7 +202,7 @@ async def get_translation(task_id: str, tgt_lang: str):
         }), 200
 
     # Достаём транскрибацию
-    entry = task_store.get(task_id) or await db_get_task(task_id)
+    entry = await db_get_task(task_id) or task_store.get(task_id)
     if entry is None:
         return jsonify({"error": "Task not found"}), 404
 
@@ -196,7 +238,7 @@ async def get_translation(task_id: str, tgt_lang: str):
 @app.route('/translated/<task_id>', methods=['GET'])
 async def list_translations(task_id: str):
     """Список всех переводов для задачи со ссылками."""
-    entry = task_store.get(task_id) or await db_get_task(task_id)
+    entry = await db_get_task(task_id) or task_store.get(task_id)
     if entry is None:
         return jsonify({"error": "Task not found"}), 404
 
@@ -214,7 +256,7 @@ async def list_translations(task_id: str):
             for r in rows
         ],
         "available_languages": {
-            code: {"label": info.label, "flag": info.flag, "url": f"/translated/{task_id}/{code}"}
-            for code, info in LANGUAGES.items()
+            language_code: {"label": language.label, "flag": language.flag, "url": f"/translated/{task_id}/{language_code}"}
+            for language_code, language in LANGUAGES.items()
         },
     }), 200

@@ -14,22 +14,23 @@ import uuid
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
+    WebAppInfo,
 )
 
-import settings
-from config import TMP_DIR, logger
+from config import TMP_DIR, logger, settings
 from storage import task_queue, task_store, store_put
 from database import db_insert_task, db_get_task, db_get_translation, db_upsert_translation
-from translation import LANGUAGES, run_translate_sync
+from translation import LANGUAGES
 from gemini_vision import analyze_image_sync
 
-bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+bot = Bot(token=settings.telegram_bot_token)
 logger.info("[BOT] Используем стандартный Bot API (лимит файлов 20 МБ)")
 dp = Dispatcher()
 
@@ -48,13 +49,27 @@ def _translate_keyboard(task_id: str, prefix: str = "translate") -> InlineKeyboa
     """Строит inline-клавиатуру с языками перевода. prefix задаёт тип callback."""
     buttons = [
         InlineKeyboardButton(
-            text=f"{info.flag} {info.label}",
-            callback_data=f"{prefix}:{task_id}:{code}",
+            text=f"{language.flag} {language.label}",
+            callback_data=f"{prefix}:{task_id}:{language_code}",
         )
-        for code, info in LANGUAGES.items()
+        for language_code, language in LANGUAGES.items()
     ]
-    rows = [buttons[i: i + 2] for i in range(0, len(buttons), 2)]
+    rows = [buttons[offset: offset + 2] for offset in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _stats_keyboard() -> InlineKeyboardMarkup | None:
+    """Возвращает кнопку Mini App, если для него настроен публичный HTTPS URL."""
+    if not settings.webapp_url:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="📊 Открыть статистику",
+                web_app=WebAppInfo(url=settings.webapp_url),
+            )
+        ]]
+    )
 
 
 # =============================================================================
@@ -97,6 +112,20 @@ async def cmd_start(message: Message) -> None:
         "💬 <b>Текст</b> → перевод на выбранный язык\n\n"
         "Просто отправь файл или напиши что-нибудь!",
         parse_mode="HTML",
+        reply_markup=_stats_keyboard(),
+    )
+
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    """Показывает Mini App как обычную inline-кнопку в чате."""
+    keyboard = _stats_keyboard()
+    if keyboard is None:
+        await message.answer("Страница статистики пока недоступна. Попробуйте немного позже.")
+        return
+    await message.answer(
+        "📊 Откройте личную статистику транскрибаций, распознавания и переводов:",
+        reply_markup=keyboard,
     )
 
 
@@ -113,7 +142,7 @@ async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int
     chat_id  = str(message.chat.id)
 
     # Проверяем размер файла если не используем локальный сервер
-    local_server = getattr(settings, "TELEGRAM_LOCAL_SERVER", "")
+    local_server = settings.telegram_local_server
     if not local_server and file_size > BOT_API_FILE_LIMIT:
         size_mb = file_size / 1024 / 1024
         await message.answer(
@@ -131,8 +160,10 @@ async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int
     try:
         await message.answer("⏳ Получил файл, ставлю в очередь на транскрибацию...")
 
-        tg_file = await bot.get_file(file_id)
-        await bot.download_file(tg_file.file_path, destination=audio_path)
+        # The default aiogram download timeout is 30 s.  Audio from Telegram
+        # can take longer even when it is smaller than the Bot API size limit.
+        tg_file = await bot.get_file(file_id, request_timeout=120)
+        await bot.download_file(tg_file.file_path, destination=audio_path, timeout=120)
         logger.info(f"[BOT] Аудио сохранено: {audio_path}, chat_id={chat_id}")
 
         await db_insert_task(task_id, uid=None, poll_url=poll_url, chat_id=chat_id)
@@ -144,9 +175,13 @@ async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int
             "Пришлю результат, как только готово.",
             parse_mode="HTML",
         )
-    except Exception as e:
-        logger.error(f"[BOT] Ошибка приёма аудио: {e}")
-        await message.answer(f"❌ Не удалось принять файл: {e}")
+    except Exception:
+        logger.exception("[BOT] Ошибка приёма аудио")
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        await message.answer(
+            "❌ Не удалось скачать файл из Telegram. Попробуйте отправить его ещё раз немного позже.",
+        )
 
 
 @dp.message(F.voice)
@@ -181,23 +216,23 @@ async def _handle_image(message: Message, file_id: str, mime_type: str = "image/
         logger.info(f"[BOT] Изображение получено: {len(image_bytes)} байт, caption={caption!r}, chat_id={chat_id}")
 
         loop   = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, analyze_image_sync, image_bytes, mime_type, caption)
+        image_analysis = await loop.run_in_executor(None, analyze_image_sync, image_bytes, mime_type, caption)
 
         header = "🖼 <b>Результат анализа изображения:</b>\n\n"
-        await _send_text(chat_id, header, result)
+        await _send_text(chat_id, header, image_analysis)
 
         # Предлагаем перевод результата
         temp_id = uuid.uuid4().hex
-        _text_store[temp_id] = {"text": result, "src_lang": "auto"}
+        _text_store[temp_id] = {"text": image_analysis, "src_lang": "auto"}
         await bot.send_message(
             chat_id,
             "🌐 Хочешь перевести результат?",
             reply_markup=_translate_keyboard(temp_id, prefix="translate_plain"),
         )
 
-    except Exception as e:
-        logger.error(f"[BOT] Ошибка анализа изображения: {e}")
-        await message.answer(f"❌ Не удалось проанализировать изображение: {e}")
+    except Exception:
+        logger.exception("[BOT] Ошибка анализа изображения")
+        await message.answer("❌ Не удалось обработать изображение. Попробуйте ещё раз немного позже.")
 
 
 @dp.message(F.photo)
@@ -267,7 +302,11 @@ async def handle_translate_callback(callback: CallbackQuery) -> None:
         await _send_translation(chat_id, task_id, tgt_lang, cached["translated"], from_cache=True)
         return
 
-    entry = task_store.get(task_id) or await db_get_task(task_id)
+    # The bot and worker run in separate containers.  The bot's in-memory
+    # cache retains its initial ``pending`` value, while the worker updates
+    # the shared SQLite database.  Prefer the database for the authoritative
+    # cross-service status.
+    entry = await db_get_task(task_id) or task_store.get(task_id)
     if not entry:
         await bot.send_message(chat_id, f"❌ Задача <code>{task_id}</code> не найдена.", parse_mode="HTML")
         return
@@ -284,12 +323,14 @@ async def handle_translate_callback(callback: CallbackQuery) -> None:
         return
 
     await bot.send_message(chat_id, f"⏳ Переводим на {lang_label}...")
-
-    loop = asyncio.get_running_loop()
-    translated = await loop.run_in_executor(None, run_translate_sync, source_text, "vie_Latn", tgt_lang)
-
-    await db_upsert_translation(task_id, "vie_Latn", tgt_lang, translated)
-    await _send_translation(chat_id, task_id, tgt_lang, translated, from_cache=False)
+    await task_queue.put({
+        "kind": "translation",
+        "task_id": task_id,
+        "chat_id": chat_id,
+        "source_text": source_text,
+        "src_lang": "vie_Latn",
+        "tgt_lang": tgt_lang,
+    })
 
 
 # =============================================================================
@@ -314,12 +355,13 @@ async def handle_translate_plain_callback(callback: CallbackQuery) -> None:
     src_lang    = "vie_Latn"   # дефолт; Gemini сам определит язык если "auto"
 
     await bot.send_message(chat_id, f"⏳ Переводим на {lang_label}...")
-
-    loop = asyncio.get_running_loop()
-    translated = await loop.run_in_executor(None, run_translate_sync, source_text, src_lang, tgt_lang)
-
-    header = f"🌐 <b>Перевод на {lang_label}:</b>\n\n"
-    await _send_text(chat_id, header, translated)
+    await task_queue.put({
+        "kind": "translation",
+        "chat_id": chat_id,
+        "source_text": source_text,
+        "src_lang": src_lang,
+        "tgt_lang": tgt_lang,
+    })
 
 
 # =============================================================================
@@ -361,4 +403,14 @@ async def send_transcription_result(chat_id: str, task_id: str, text: str) -> No
 
 async def start_bot() -> None:
     logger.info("[BOT] Запуск Telegram бота...")
+    if settings.webapp_url:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Статистика",
+                web_app=WebAppInfo(url=settings.webapp_url),
+            )
+        )
+        logger.info("[BOT] Mini App menu button configured: %s", settings.webapp_url)
+    else:
+        logger.info("[BOT] WEBAPP_URL is empty; Mini App menu button is disabled")
     await dp.start_polling(bot, handle_signals=False)

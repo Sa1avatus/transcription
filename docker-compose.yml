@@ -1,0 +1,104 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      RUN_EMBEDDED_WORKER: "false"
+      ENABLE_TELEGRAM_BOT: "false"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
+      DATA_DIRECTORY: /app/data
+    ports:
+      - "5000:5000"
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+      args:
+        INSTALL_NLLB: ${INSTALL_NLLB:-false}
+        INSTALL_QWEN: ${INSTALL_QWEN:-false}
+    env_file: .env
+    environment:
+      RUN_EMBEDDED_WORKER: "false"
+      LOAD_LOCAL_MODELS: "true"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
+      DATA_DIRECTORY: /app/data
+    volumes:
+      - app-data:/app/data
+      # Place Whisper/NLLB/Qwen files here; this keeps model artefacts out of the image.
+      - ${MODEL_DIRECTORY:-./models}:/app/data/models:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  bot:
+    profiles: [telegram]
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
+      DATA_DIRECTORY: /app/data
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  miniapp-gateway:
+    profiles: [telegram]
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:5050:8080"
+    volumes:
+      - ./nginx/miniapp.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: transcription
+      POSTGRES_USER: transcription
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transcription_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transcription -d transcription"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-data:
+  redis-data:
+  postgres-data:

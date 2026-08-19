@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Статистика</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root { --bg: var(--tg-theme-bg-color,#10151f); --text: var(--tg-theme-text-color,#eef3fa); --hint: var(--tg-theme-hint-color,#91a0b5); --card: var(--tg-theme-secondary-bg-color,#1b2432); --accent: var(--tg-theme-button-color,#53a6f5); --ok:#3ddc97; --bad:#ff6b81; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} main{max-width:720px;margin:auto;padding:22px 16px 40px} h1{font-size:26px;margin:0 0 5px}.hint{color:var(--hint);margin:0 0 20px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.card{background:var(--card);border-radius:16px;padding:16px}.card small{color:var(--hint);display:block}.value{font-size:28px;font-weight:700;margin-top:6px}.wide{grid-column:span 2}.success{color:var(--ok)}.error{color:var(--bad)}section{margin-top:22px}h2{font-size:18px;margin:0 0 10px}.list{background:var(--card);border-radius:16px;overflow:hidden}.row{padding:13px 15px;border-bottom:1px solid color-mix(in srgb,var(--hint) 18%,transparent);display:flex;justify-content:space-between;gap:10px}.row:last-child{border:0}.status{font-weight:600}.done{color:var(--ok)}.error{color:var(--bad)}.pending,.processing{color:#f6c453}.empty,.failure{background:var(--card);padding:16px;border-radius:16px;color:var(--hint)}button{border:0;background:var(--accent);color:var(--tg-theme-button-text-color,#fff);padding:11px 15px;border-radius:12px;font-weight:700;font-size:15px;margin-top:16px;width:100%}
+  </style>
+</head>
+<body><main>
+  <h1 id="title">Моя статистика</h1><p class="hint">Транскрибации и переводы из личного чата с ботом</p>
+  <div id="loading" class="empty">Загружаем данные…</div>
+  <div id="content" hidden>
+    <div class="grid">
+      <div class="card"><small>Транскрибации</small><div class="value" id="total">0</div></div>
+      <div class="card"><small>Переводы</small><div class="value" id="translations">0</div></div>
+      <div class="card"><small>Готово</small><div class="value success" id="done">0</div></div>
+      <div class="card"><small>Ошибки</small><div class="value error" id="errors">0</div></div>
+      <div class="card wide"><small>В очереди / обрабатывается</small><div class="value" id="active">0</div></div>
+    </div>
+    <section><h2>Популярные языки перевода</h2><div class="list" id="languages"></div></section>
+    <section><h2>Последние задачи</h2><div class="list" id="recent"></div></section>
+  </div>
+  <div id="failure" class="failure" hidden>Не удалось подтвердить сессию Telegram. Открой страницу из меню бота.</div>
+  <button id="refresh" hidden>Обновить</button>
+</main><script>
+  const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+  const $=id=>document.getElementById(id); const langs={eng_Latn:'🇬🇧 English',rus_Cyrl:'🇷🇺 Русский',vie_Latn:'🇻🇳 Tiếng Việt',zho_Hans:'🇨🇳 中文',fra_Latn:'🇫🇷 Français',deu_Latn:'🇩🇪 Deutsch',kor_Hang:'🇰🇷 한국어',jpn_Jpan:'🇯🇵 日本語'};
+  const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  function render(d){const s=d.statistics; $('title').textContent=`Статистика: ${d.user.first_name||'пользователь'}`; for(const k of ['total','translations','done','errors','active']) $(k).textContent=s[k]||0; $('languages').innerHTML=(s.languages||[]).map(x=>`<div class="row"><span>${esc(langs[x.language]||x.language)}</span><b>${x.total}</b></div>`).join('')||'<div class="row"><span>Переводов пока нет</span></div>'; $('recent').innerHTML=(s.recent||[]).map(x=>`<div class="row"><span><code>${esc(x.task_id.slice(0,8))}</code><br><small>${new Date(x.created_at).toLocaleString()}</small></span><span class="status ${esc(x.status)}">${esc(x.status)}</span></div>`).join('')||'<div class="row"><span>Задач пока нет</span></div>'; $('loading').hidden=true;$('content').hidden=false;$('refresh').hidden=false;}
+  async function load(){ $('failure').hidden=true; $('loading').hidden=false; try{const r=await fetch('/api/miniapp/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg?.initData||''})});if(!r.ok)throw Error();render(await r.json())}catch{$('loading').hidden=true;$('failure').hidden=false}}
+  $('refresh').onclick=load;load();
+</script></body></html>

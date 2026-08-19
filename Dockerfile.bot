@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+WORKDIR /app
+COPY requirements.txt requirements-bot.txt .
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-bot.txt
+COPY requirements-db.txt .
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-db.txt
+COPY . .
+RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser:appuser /app
+USER appuser
+CMD ["python", "bot_main.py"]

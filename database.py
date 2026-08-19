@@ -36,8 +36,10 @@ DB_PATH = f"{BASE_PATH}/tasks.db"
 # =============================================================================
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -95,7 +97,7 @@ def _sync_insert_task(
         conn.commit()
 
 
-def _sync_update_task(task_id: str, status: str, result: Optional[str]) -> None:
+def _sync_update_task(task_id: str, status: str, task_result: Optional[str]) -> None:
     now = _now()
     with _connect() as conn:
         conn.execute(
@@ -104,7 +106,7 @@ def _sync_update_task(task_id: str, status: str, result: Optional[str]) -> None:
                SET status = ?, result = COALESCE(?, result), updated_at = ?
              WHERE task_id = ?
             """,
-            (status, result, now, task_id),
+            (status, task_result, now, task_id),
         )
         conn.commit()
 
@@ -174,9 +176,9 @@ def _sync_get_all_translations(task_id: str) -> list:
 # АСИНХРОННЫЕ ОБЁРТКИ
 # =============================================================================
 
-async def _run(fn, *args):
+async def _run(blocking_operation, *args):
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, fn, *args)
+    return await loop.run_in_executor(None, blocking_operation, *args)
 
 
 async def init_db() -> None:
@@ -189,8 +191,8 @@ async def db_insert_task(
     await _run(_sync_insert_task, task_id, uid, poll_url, chat_id)
 
 
-async def db_update_task(task_id: str, status: str, result: Optional[str] = None) -> None:
-    await _run(_sync_update_task, task_id, status, result)
+async def db_update_task(task_id: str, status: str, task_result: Optional[str] = None) -> None:
+    await _run(_sync_update_task, task_id, status, task_result)
 
 
 async def db_get_task(task_id: str) -> Optional[dict]:
@@ -240,3 +242,60 @@ async def db_get_translation(task_id: str, tgt_lang: str) -> Optional[dict]:
 
 async def db_get_all_translations(task_id: str) -> list:
     return await _run(_sync_get_all_translations, task_id)
+
+
+def _sync_user_statistics(chat_id: str) -> dict:
+    with _connect() as conn:
+        summary = conn.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
+                      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                      SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) AS active
+                 FROM tasks WHERE chat_id = ?""",
+            (chat_id,),
+        ).fetchone()
+        translations = conn.execute(
+            """SELECT COUNT(*) AS total FROM translations tr
+                 JOIN tasks t ON t.task_id = tr.task_id WHERE t.chat_id = ?""",
+            (chat_id,),
+        ).fetchone()["total"]
+        languages = conn.execute(
+            """SELECT tr.tgt_lang AS language, COUNT(*) AS total FROM translations tr
+                 JOIN tasks t ON t.task_id = tr.task_id WHERE t.chat_id = ?
+                 GROUP BY tr.tgt_lang ORDER BY total DESC, language LIMIT 5""",
+            (chat_id,),
+        ).fetchall()
+        recent = conn.execute(
+            """SELECT task_id, status, created_at, updated_at FROM tasks
+                 WHERE chat_id = ? ORDER BY created_at DESC LIMIT 10""",
+            (chat_id,),
+        ).fetchall()
+    statistics = dict(summary)
+    statistics["done"] = statistics["done"] or 0
+    statistics["errors"] = statistics["errors"] or 0
+    statistics["active"] = statistics["active"] or 0
+    statistics["translations"] = translations
+    statistics["languages"] = [dict(row) for row in languages]
+    statistics["recent"] = [dict(row) for row in recent]
+    return statistics
+
+
+async def db_get_user_statistics(chat_id: str) -> dict:
+    return await _run(_sync_user_statistics, chat_id)
+
+
+# PostgreSQL is selected explicitly for Docker Compose and Kubernetes.  Keep
+# SQLite as a no-configuration fallback for one-process local development.
+if __import__("config").settings.database_url:
+    from database_postgres import (  # noqa: F401
+        db_all_tasks,
+        db_get_all_translations,
+        db_get_task,
+        db_get_translation,
+        db_get_user_statistics,
+        db_insert_task,
+        db_restore_task_store,
+        db_update_task,
+        db_upsert_translation,
+        init_db,
+    )

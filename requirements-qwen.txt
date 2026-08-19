@@ -1,0 +1,2 @@
+# Optional local Qwen correction backend. Keep disabled on 4 GB GPU profiles.
+llama-cpp-python>=0.2,<1

@@ -1,0 +1,22 @@
+# Runtime artefacts are mounted as volumes and must never be baked into images.
+models/
+data/
+
+# Local environments, credentials and development artefacts.
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+
+# Repository and editor metadata are not needed at runtime.
+.git/
+.github/
+.agents/
+.codex/
+.vscode/
+.idea/
+tests/
+*.tar
+*.log

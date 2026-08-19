@@ -1,0 +1,78 @@
+# Replace image names with images published by your CI registry before applying.
+apiVersion: v1
+kind: Service
+metadata:
+  name: transcription-api
+spec:
+  selector: {app: transcription-api}
+  ports: [{port: 80, targetPort: 5000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcription-api
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: transcription-api}}
+  template:
+    metadata: {labels: {app: transcription-api}}
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/transcription-api:TAG
+          ports: [{containerPort: 5000}]
+          envFrom:
+            - configMapRef: {name: transcription-config}
+            - secretRef: {name: transcription-secrets}
+          volumeMounts: [{name: data, mountPath: /app/data}]
+          readinessProbe: {httpGet: {path: /health, port: 5000}, initialDelaySeconds: 5}
+          livenessProbe: {httpGet: {path: /health, port: 5000}, initialDelaySeconds: 15}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+      volumes: [{name: data, persistentVolumeClaim: {claimName: transcription-data}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcription-worker
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: transcription-worker}}
+  template:
+    metadata: {labels: {app: transcription-worker}}
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/transcription-worker:TAG
+          envFrom:
+            - configMapRef: {name: transcription-config}
+            - secretRef: {name: transcription-secrets}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: models, mountPath: /app/data/models, readOnly: true}
+          resources:
+            requests: {cpu: "2", memory: 4Gi, nvidia.com/gpu: "1"}
+            limits: {cpu: "4", memory: 8Gi, nvidia.com/gpu: "1"}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: transcription-data}}
+        - {name: models, persistentVolumeClaim: {claimName: transcription-models}}
+---
+# Telegram long polling must have exactly one active replica per bot token.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcription-bot
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: transcription-bot}}
+  template:
+    metadata: {labels: {app: transcription-bot}}
+    spec:
+      containers:
+        - name: bot
+          image: ghcr.io/your-org/transcription-bot:TAG
+          envFrom:
+            - configMapRef: {name: transcription-config}
+            - secretRef: {name: transcription-secrets}
+          volumeMounts: [{name: data, mountPath: /app/data}]
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+      volumes: [{name: data, persistentVolumeClaim: {claimName: transcription-data}}]
