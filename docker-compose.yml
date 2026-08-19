@@ -61,7 +61,7 @@ services:
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql://transcription:***@postgres:5432/transcription
+      DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
       DATA_DIRECTORY: /app/data
       TELEGRAM_LOCAL_SERVER: http://telegram-bot-api:8081
     volumes:
