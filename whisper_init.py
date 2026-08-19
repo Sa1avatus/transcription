@@ -222,11 +222,16 @@ async def download_model(size: str) -> dict:
         _models_dir().mkdir(parents=True, exist_ok=True)
 
         def _do_download():
-            _ensure_ml_deps()
             model_ref = f"Systran/faster-whisper-{size}"
+            target_dir = str(_models_dir())
             logger.info(f"Whisper DOWNLOAD: starting '{model_ref}'")
-            # faster-whisper downloads automatically; we just need to load with local_files_only=False
-            WhisperModel(model_ref, device="cpu", compute_type="int8", local_files_only=False)
+            # Use huggingface_hub directly — no ctranslate2 needed
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=model_ref,
+                local_dir=f"{target_dir}/{size}",
+                local_dir_use_symlinks=False,
+            )
             logger.info(f"Whisper DOWNLOAD: '{size}' complete")
             return True
 
