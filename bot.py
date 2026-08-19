@@ -177,21 +177,23 @@ async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int
         logger.exception("[BOT] Ошибка приёма аудио")
         if os.path.exists(audio_path):
             os.remove(audio_path)
-        if file_size and file_size > BOT_API_FILE_LIMIT:
-            size_mb = file_size / 1048576
-            await message.answer(
-                f"❌ Не удалось скачать файл ({size_mb:.1f} МБ) из Telegram.\n\n"
-                f"Для файлов >20 МБ загрузите через веб-интерфейс:\n"
-                f"• Откройте API в браузере (порт 5000)\n"
-                f"• Перейдите на вкладку Dashboard\n"
-                f"• Перетащите файл в зону загрузки\n\n"
-                f"Или настройте локальный Telegram Bot API сервер."
-            )
-        else:
-            await message.answer(
-                "❌ Не удалось скачать файл из Telegram. "
-                "Попробуйте отправить его ещё раз немного позже."
-            )
+        try:
+            if file_size and file_size > BOT_API_FILE_LIMIT:
+                size_mb = file_size / 1048576
+                await message.answer(
+                    f"❌ Не удалось скачать файл ({size_mb:.1f} МБ) из Telegram.\n\n"
+                    f"Для файлов >20 МБ загрузите через веб-интерфейс:\n"
+                    f"• Откройте API в браузере (порт 5000)\n"
+                    f"• Перейдите на вкладку Dashboard\n"
+                    f"• Перетащите файл в зону загрузки"
+                )
+            else:
+                await message.answer(
+                    "❌ Не удалось скачать файл из Telegram. "
+                    "Попробуйте отправить его ещё раз немного позже."
+                )
+        except Exception:
+            logger.exception("[BOT] Не удалось отправить сообщение об ошибке пользователю")
 
 
 @dp.message(F.voice)
