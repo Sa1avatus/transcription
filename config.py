@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
+from typing import Any
 
 try:
     from dotenv import load_dotenv
@@ -40,8 +41,6 @@ class Settings:
     enable_telegram_bot: bool = _bool("ENABLE_TELEGRAM_BOT")
     run_embedded_worker: bool = _bool("RUN_EMBEDDED_WORKER", True)
     redis_url: str = os.getenv("REDIS_URL", "")
-    # PostgreSQL is required when API, bot and worker run as independent pods.
-    # Leave empty only for the legacy local SQLite development mode.
     database_url: str = os.getenv("DATABASE_URL", "")
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_local_server: str = os.getenv("TELEGRAM_LOCAL_SERVER", "")
@@ -71,3 +70,133 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("transcription_service")
+
+
+# =============================================================================
+# Settings management (for web UI)
+# =============================================================================
+
+# Fields that can be edited via the web UI
+EDITABLE_FIELDS: dict[str, dict[str, Any]] = {
+    "whisper_model_size": {"label": "Whisper Model Size", "type": "select", "options": [
+        "tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3",
+        "distil-large-v2", "distil-large-v3", "distil-medium", "distil-small",
+    ]},
+    "translation_backend": {"label": "Translation Backend", "type": "select", "options": [
+        "gemini", "deepl", "nllb_600m", "nllb_1300m",
+    ]},
+    "gemini_api_key": {"label": "Gemini API Key", "type": "password"},
+    "gemini_model": {"label": "Gemini Model", "type": "text"},
+    "gemini_vision_model": {"label": "Gemini Vision Model", "type": "text"},
+    "deepl_api_key": {"label": "DeepL API Key", "type": "password"},
+    "telegram_bot_token": {"label": "Telegram Bot Token", "type": "password"},
+    "webapp_url": {"label": "WebApp URL", "type": "text"},
+    "omninet_url": {"label": "Omninet URL", "type": "text"},
+    "omninet_login": {"label": "Omninet Login", "type": "text"},
+    "omninet_password": {"label": "Omninet Password", "type": "password"},
+    "third_party_url": {"label": "Third Party URL", "type": "text"},
+    "third_party_api_key": {"label": "Third Party API Key", "type": "password"},
+    "load_local_models": {"label": "Load Local Models", "type": "bool"},
+    "enable_qwen_correction": {"label": "Enable Qwen Correction", "type": "bool"},
+    "enable_telegram_bot": {"label": "Enable Telegram Bot", "type": "bool"},
+    "run_embedded_worker": {"label": "Run Embedded Worker", "type": "bool"},
+    "internal_tls_verify": {"label": "Internal TLS Verify", "type": "bool"},
+}
+
+
+def get_settings_dict() -> dict[str, Any]:
+    """Return current settings as a dict (sensitive fields masked)."""
+    result = {}
+    for f in fields(settings):
+        if f.name == "data_dir":
+            continue
+        value = getattr(settings, f.name)
+        if f.name in ("gemini_api_key", "deepl_api_key", "telegram_bot_token",
+                       "omninet_password", "third_party_api_key"):
+            # Mask sensitive fields
+            result[f.name] = "***" if value else ""
+        else:
+            result[f.name] = value
+    return result
+
+
+def _env_path() -> Path:
+    return PROJECT_ROOT / ".env"
+
+
+def _read_env() -> dict[str, str]:
+    """Read .env file into a dict."""
+    env_path = _env_path()
+    if not env_path.exists():
+        return {}
+    result = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            result[key.strip()] = value.strip()
+    return result
+
+
+def _write_env(data: dict[str, str]) -> None:
+    """Write dict back to .env file, preserving comments and ordering."""
+    env_path = _env_path()
+    lines: list[str] = []
+
+    if env_path.exists():
+        existing_lines = env_path.read_text(encoding="utf-8").splitlines()
+        written_keys: set[str] = set()
+        for line in existing_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key = stripped.partition("=")[0].strip()
+                if key in data:
+                    lines.append(f"{key}={data[key]}")
+                    written_keys.add(key)
+                else:
+                    lines.append(line)
+            else:
+                lines.append(line)
+        # Append new keys not in existing file
+        for key, value in data.items():
+            if key not in written_keys:
+                lines.append(f"{key}={value}")
+    else:
+        for key, value in data.items():
+            lines.append(f"{key}={value}")
+
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def update_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    """Update settings in memory and persist to .env.
+
+    Returns the updated settings dict.
+    """
+    global settings
+
+    # Convert bool fields
+    bool_fields = {f.name for f in fields(settings) if f.type == "bool"}
+    int_fields = {f.name for f in fields(settings) if f.type == "int"}
+
+    kwargs: dict[str, Any] = {}
+    for key, value in updates.items():
+        if key in bool_fields:
+            kwargs[key] = str(value).lower() in ("1", "true", "yes", "on")
+        elif key in int_fields:
+            kwargs[key] = int(value)
+        else:
+            kwargs[key] = value
+
+    # Update in-memory settings
+    settings = replace(settings, **kwargs)
+
+    # Persist to .env
+    env = _read_env()
+    env.update({k: str(v) for k, v in kwargs.items()})
+    _write_env(env)
+
+    logger.info(f"Settings updated: {list(kwargs.keys())}")
+    return get_settings_dict()

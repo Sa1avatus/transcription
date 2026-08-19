@@ -7,6 +7,10 @@
     :root{color-scheme:dark;--card:#152033;--muted:#94a3b8;--accent:#38bdf8;--ok:#34d399;--err:#fb7185}
     *{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:15px system-ui,sans-serif}
     main{max-width:1100px;margin:0 auto;padding:48px 24px} h1{margin:0;font-size:32px} p{color:var(--muted)}
+    .nav{display:flex;gap:16px;margin:16px 0 24px}
+    .nav a{color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:6px;font-size:13px}
+    .nav a:hover{color:var(--accent);background:rgba(56,189,248,.1)}
+    .nav a.active{color:var(--accent);background:rgba(56,189,248,.15)}
     .summary{display:flex;gap:16px;flex-wrap:wrap;margin:28px 0}.card{background:var(--card);border:1px solid #26354d;border-radius:12px;padding:18px;min-width:150px}
     .value{display:block;font-size:28px;font-weight:700;color:var(--accent)} table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden}
     th,td{text-align:left;padding:14px;border-bottom:1px solid #26354d}th{color:var(--muted);font-weight:600}.status{font-weight:700}.done{color:var(--ok)}.error{color:var(--err)}
@@ -15,11 +19,16 @@
 </head>
 <body><main>
   <h1>Transcription Service</h1>
+  <div class="nav">
+    <a href="/" class="active">Dashboard</a>
+    <a href="/models">Models</a>
+    <a href="/settings">Settings</a>
+  </div>
   <p>Queue observability dashboard. Data refreshes every 10 seconds.</p>
   <div class="summary"><div class="card">Total <span class="value" id="total">—</span></div><div class="card">Pending <span class="value" id="pending">—</span></div><div class="card">Completed <span class="value" id="done">—</span></div><div class="card"><button id="refresh">Refresh</button></div></div>
   <table><thead><tr><th>Task</th><th>Status</th><th>Created</th><th>Channel</th></tr></thead><tbody id="tasks"><tr><td colspan="4">Loading…</td></tr></tbody></table>
 </main><script>
-const $=id=>document.getElementById(id); const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-async function load(){try{const r=await fetch('/task/');if(!r.ok)throw Error();const d=await r.json(),tasks=d.tasks||[];$('total').textContent=d.total;$('pending').textContent=tasks.filter(t=>['pending','processing'].includes(t.status)).length;$('done').textContent=tasks.filter(t=>t.status==='done').length;$('tasks').innerHTML=tasks.slice(0,30).map(t=>`<tr><td><code>${esc(t.task_id)}</code></td><td class="status ${esc(t.status)}">${esc(t.status)}</td><td>${esc(t.created_at)}</td><td>${t.uid?'OMNINET':t.chat_id?'Telegram':'API'}</td></tr>`).join('')||'<tr><td colspan="4">No tasks yet.</td></tr>'}catch{$('tasks').innerHTML='<tr><td colspan="4">Could not load task data.</td></tr>'}}
+const $=id=>document.getElementById(id); const esc=s=>String(s??'—').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#039;'}[c]));
+async function load(){try{const r=await fetch('/task/');if(!r.ok)throw Error();const d=await r.json(),tasks=d.tasks||[];$('total').textContent=d.total;$('pending').textContent=tasks.filter(t=>['pending','processing'].includes(t.status)).length;$('done').textContent=tasks.filter(t=>t.status==='done').length;$('tasks').innerHTML=tasks.slice(0,30).map(t=>`<tr><td><code>${esc(t.task_id)}</code></td><td class=\"status ${esc(t.status)}\">${esc(t.status)}</td><td>${esc(t.created_at)}</td><td>${t.uid?'OMNINET':t.chat_id?'Telegram':'API'}</td></tr>`).join('')||'<tr><td colspan=\"4\">No tasks yet.</td></tr>'}catch{$('tasks').innerHTML='<tr><td colspan=\"4\">Could not load task data.</td></tr>'}}
 $('refresh').onclick=load;load();setInterval(load,10000);
 </script></body></html>

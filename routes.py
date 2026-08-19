@@ -313,3 +313,43 @@ async def api_download_model():
 async def api_model_info():
     """Return current model metadata."""
     return jsonify(whisper_init.get_model_info()), 200
+
+
+# =============================================================================
+# УПРАВЛЕНИЕ НАСТРОЙКАМИ
+# =============================================================================
+
+@app.route('/settings', methods=['GET'])
+async def settings_page():
+    """Web UI for managing application settings."""
+    return await render_template('settings.html')
+
+
+@app.route('/api/settings', methods=['GET'])
+async def api_get_settings():
+    """Return current settings (sensitive fields masked)."""
+    from config import get_settings_dict, EDITABLE_FIELDS
+    return jsonify({"settings": get_settings_dict(), "editable": EDITABLE_FIELDS}), 200
+
+
+@app.route('/api/settings', methods=['POST'])
+async def api_update_settings():
+    """Update settings. Accepts JSON with key-value pairs."""
+    from config import update_settings, EDITABLE_FIELDS
+    payload = await request.get_json(silent=True) or {}
+
+    if not payload:
+        return jsonify({"error": "Provide settings to update in request body"}), 400
+
+    # Validate that only editable fields are being changed
+    invalid = [k for k in payload if k not in EDITABLE_FIELDS]
+    if invalid:
+        return jsonify({"error": f"Cannot edit fields: {invalid}", "editable": list(EDITABLE_FIELDS.keys())}), 400
+
+    try:
+        result = update_settings(payload)
+        logger.info(f"API: settings updated: {list(payload.keys())}")
+        return jsonify({"ok": True, "settings": result}), 200
+    except Exception as e:
+        logger.error(f"API: settings update failed: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 400

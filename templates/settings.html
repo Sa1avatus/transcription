@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings — Transcription Service</title>
+  <style>
+    :root{color-scheme:dark;--card:#152033;--muted:#94a3b8;--accent:#38bdf8;--ok:#34d399;--err:#fb7185;--border:#26354d;--input:#0d1829}
+    *{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:15px system-ui,sans-serif}
+    main{max-width:900px;margin:0 auto;padding:48px 24px}
+    h1{margin:0 0 8px;font-size:28px} h2{margin:32px 0 16px;font-size:18px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:8px}
+    p{color:var(--muted);margin:0 0 24px}
+    .back{color:var(--accent);text-decoration:none;font-size:14px} .back:hover{text-decoration:underline}
+    .nav{display:flex;gap:16px;margin-bottom:32px}
+    .nav a{color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:6px;font-size:13px}
+    .nav a:hover{color:var(--accent);background:rgba(56,189,248,.1)}
+    .nav a.active{color:var(--accent);background:rgba(56,189,248,.15)}
+
+    /* Form */
+    .form-group{margin-bottom:20px}
+    .form-label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+    .form-hint{font-size:12px;color:var(--muted);margin-top:4px;opacity:.7}
+    .form-input,.form-select{width:100%;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:#e5e7eb;font-size:14px;font-family:inherit;transition:border .15s}
+    .form-input:focus,.form-select:focus{outline:none;border-color:var(--accent)}
+    .form-input::placeholder{color:#475569}
+    .form-select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media(max-width:600px){.form-row{grid-template-columns:1fr}}
+
+    /* Toggle */
+    .toggle-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+    .toggle-row:last-child{border-bottom:none}
+    .toggle-label{flex:1}
+    .toggle-label strong{display:block;color:#e5e7eb;font-size:14px}
+    .toggle-label span{font-size:12px;color:var(--muted)}
+    .toggle{position:relative;width:44px;height:24px;cursor:pointer}
+    .toggle input{opacity:0;width:0;height:0}
+    .toggle .slider{position:absolute;inset:0;background:#374151;border-radius:24px;transition:.2s}
+    .toggle .slider::before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;background:#e5e7eb;border-radius:50%;transition:.2s}
+    .toggle input:checked+.slider{background:var(--accent)}
+    .toggle input:checked+.slider::before{transform:translateX(20px)}
+
+    /* Buttons */
+    .btn{border:0;border-radius:8px;padding:10px 20px;font-weight:600;font-size:14px;cursor:pointer;transition:all .15s}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-primary{background:var(--accent);color:#0b1220} .btn-primary:hover:not(:disabled){background:#7dd3fc}
+    .btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted)} .btn-outline:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .btn-bar{display:flex;gap:12px;margin-top:32px;padding-top:24px;border-top:1px solid var(--border)}
+
+    /* Toast */
+    .toast{position:fixed;top:24px;right:24px;padding:14px 20px;border-radius:10px;font-weight:600;font-size:14px;z-index:999;opacity:0;transform:translateY(-10px);transition:all .3s;pointer-events:none}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .toast-ok{background:#065f46;color:#a7f3d0;border:1px solid #10b981}
+    .toast-err{background:#7f1d1d;color:#fecaca;border:1px solid #ef4444}
+    .toast-info{background:#1e3a5f;color:#bae6fd;border:1px solid #38bdf8}
+
+    /* Spinner */
+    .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.2);border-top-color:#0b1220;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Sections */
+    .section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:24px}
+  </style>
+</head>
+<body>
+  <a class="back" href="/">&larr; Dashboard</a>
+  <main>
+    <h1>⚙️ Settings</h1>
+    <div class="nav">
+      <a href="/">Dashboard</a>
+      <a href="/models">Models</a>
+      <a href="/settings" class="active">Settings</a>
+    </div>
+    <p>Configure API keys, integrations, and service options. Changes are saved to <code>.env</code> and applied immediately.</p>
+
+    <form id="settings-form" onsubmit="return false">
+
+      <!-- API Keys -->
+      <div class="section">
+        <h2>🔑 API Keys</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="gemini_api_key">Gemini API Key</label>
+            <input class="form-input" type="password" id="gemini_api_key" placeholder="AIza...">
+            <div class="form-hint">Google AI Studio key for Gemini translation/vision</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="deepl_api_key">DeepL API Key</label>
+            <input class="form-input" type="password" id="deepl_api_key" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx">
+            <div class="form-hint">DeepL translation API key</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="third_party_api_key">Third Party API Key</label>
+            <input class="form-input" type="password" id="third_party_api_key" placeholder="sk-...">
+            <div class="form-hint">External provider API key</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="telegram_bot_token">Telegram Bot Token</label>
+            <input class="form-input" type="password" id="telegram_bot_token" placeholder="123456:ABC-DEF...">
+            <div class="form-hint">Bot token from @BotFather</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gemini Models -->
+      <div class="section">
+        <h2>🤖 Gemini Models</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="gemini_model">Gemini Model</label>
+            <input class="form-input" type="text" id="gemini_model" placeholder="gemini-2.5-flash">
+            <div class="form-hint">Model for text translation</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="gemini_vision_model">Gemini Vision Model</label>
+            <input class="form-input" type="text" id="gemini_vision_model" placeholder="gemini-2.5-flash">
+            <div class="form-hint">Model for image recognition</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Translation -->
+      <div class="section">
+        <h2>🌐 Translation</h2>
+        <div class="form-group">
+          <label class="form-label" for="translation_backend">Translation Backend</label>
+          <select class="form-select" id="translation_backend">
+            <option value="gemini">Gemini</option>
+            <option value="deepl">DeepL</option>
+            <option value="nllb_600m">NLLB-600M (local)</option>
+            <option value="nllb_1300m">NLLB-1300M (local)</option>
+          </select>
+          <div class="form-hint">Local NLLB requires INSTALL_NLLB=true in Docker</div>
+        </div>
+      </div>
+
+      <!-- Omninet -->
+      <div class="section">
+        <h2>🔗 Omninet Integration</h2>
+        <div class="form-group">
+          <label class="form-label" for="omninet_url">Omninet URL</label>
+          <input class="form-input" type="text" id="omninet_url" placeholder="https://omninet.example.com">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="omninet_login">Omninet Login</label>
+            <input class="form-input" type="text" id="omninet_login" placeholder="user@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="omninet_password">Omninet Password</label>
+            <input class="form-input" type="password" id="omninet_password" placeholder="••••••••">
+          </div>
+        </div>
+      </div>
+
+      <!-- Third Party -->
+      <div class="section">
+        <h2>🌐 Third Party Provider</h2>
+        <div class="form-group">
+          <label class="form-label" for="third_party_url">Third Party URL</label>
+          <input class="form-input" type="text" id="third_party_url" placeholder="https://api.example.com/v1">
+        </div>
+      </div>
+
+      <!-- Telegram -->
+      <div class="section">
+        <h2>📱 Telegram</h2>
+        <div class="form-group">
+          <label class="form-label" for="webapp_url">WebApp URL</label>
+          <input class="form-input" type="text" id="webapp_url" placeholder="https://stats.example.com/miniapp">
+          <div class="form-hint">Public HTTPS URL for Telegram Mini App</div>
+        </div>
+      </div>
+
+      <!-- Toggles -->
+      <div class="section">
+        <h2>🔧 Service Options</h2>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="load_local_models">
+            <span class="slider"></span>
+          </label>
+          <div class="toggle-label">
+            <strong>Load Local Models</strong>
+            <span>Load Whisper/NLLB/Qwen at worker startup</span>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="run_embedded_worker">
+            <span class="slider"></span>
+          </label>
+          <div class="toggle-label">
+            <strong>Run Embedded Worker</strong>
+            <span>Run the ML worker inside the API process</span>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="enable_telegram_bot">
+            <span class="slider"></span>
+          </label>
+          <div class="toggle-label">
+            <strong>Enable Telegram Bot</strong>
+            <span>Start the Telegram bot polling loop</span>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="enable_qwen_correction">
+            <span class="slider"></span>
+          </label>
+          <div class="toggle-label">
+            <strong>Enable Qwen Correction</strong>
+            <span>Use Qwen for post-transcription text correction</span>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="internal_tls_verify" checked>
+            <span class="slider"></span>
+          </label>
+          <div class="toggle-label">
+            <strong>Internal TLS Verify</strong>
+            <span>Verify TLS certificates for internal endpoints</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="btn-bar">
+        <button class="btn btn-primary" id="save-btn" onclick="saveSettings()">💾 Save Settings</button>
+        <button class="btn btn-outline" onclick="loadSettings()">↻ Reload</button>
+      </div>
+    </form>
+  </main>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+
+function toast(msg,type='info'){
+  const t=$('toast');t.textContent=msg;t.className='toast toast-'+type+' show';
+  setTimeout(()=>t.classList.remove('show'),4000);
+}
+
+const boolFields=['load_local_models','run_embedded_worker','enable_telegram_bot','enable_qwen_correction','internal_tls_verify'];
+
+async function loadSettings(){
+  try{
+    const r=await fetch('/api/settings');if(!r.ok)throw Error(r.statusText);
+    const d=await r.json();
+    const s=d.settings||{};
+    // Fill text/password/select inputs
+    for(const[key,meta]of Object.entries(d.editable||{})){
+      const el=$(key);if(!el)continue;
+      if(meta.type==='select'){el.value=s[key]||''}
+      else if(meta.type==='bool'){el.checked=!!s[key]}
+      else{el.value=s[key]||''}
+    }
+  }catch(e){toast('Failed to load settings: '+e.message,'err');}
+}
+
+async function saveSettings(){
+  const btn=$('save-btn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Saving…';
+  const payload={};
+  // Text/password/select
+  document.querySelectorAll('.form-input,.form-select').forEach(el=>{
+    if(el.id)payload[el.id]=el.value;
+  });
+  // Booleans
+  boolFields.forEach(f=>{payload[f]=$(f).checked});
+  try{
+    const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await r.json();
+    btn.disabled=false;btn.innerHTML='💾 Save Settings';
+    if(d.ok){toast('Settings saved successfully','ok');loadSettings();}
+    else toast(d.error||'Failed to save','err');
+  }catch(e){btn.disabled=false;btn.innerHTML='💾 Save Settings';toast('Network error: '+e.message,'err');}
+}
+
+loadSettings();
+</script>
+</body></html>
