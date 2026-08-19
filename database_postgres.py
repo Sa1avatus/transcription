@@ -58,6 +58,19 @@ def _sync_init_db() -> None:
                 updated_at TIMESTAMPTZ NOT NULL
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS model_status (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                model_size TEXT NOT NULL,
+                device TEXT NOT NULL DEFAULT 'unknown',
+                compute_type TEXT NOT NULL DEFAULT 'unknown',
+                loaded BOOLEAN NOT NULL DEFAULT FALSE,
+                load_time_s REAL,
+                cuda_devices INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT single_row CHECK (id = 1)
+            )
+        """)
     logger.info("[DB] PostgreSQL initialised")
 
 
@@ -214,3 +227,41 @@ async def db_get_all_settings() -> dict[str, str]:
 
 async def db_upsert_settings(data: dict[str, str]) -> None:
     await _run(_sync_upsert_settings, data)
+
+
+def _sync_upsert_model_status(model_size: str, device: str, compute_type: str,
+                               loaded: bool, load_time_s: float, cuda_devices: int) -> None:
+    now = _now()
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO model_status (id, model_size, device, compute_type, loaded, load_time_s, cuda_devices, updated_at)
+               VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   model_size = EXCLUDED.model_size,
+                   device = EXCLUDED.device,
+                   compute_type = EXCLUDED.compute_type,
+                   loaded = EXCLUDED.loaded,
+                   load_time_s = EXCLUDED.load_time_s,
+                   cuda_devices = EXCLUDED.cuda_devices,
+                   updated_at = EXCLUDED.updated_at""",
+            (model_size, device, compute_type, loaded, load_time_s, cuda_devices, now),
+        )
+
+
+def _sync_get_model_status() -> dict:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM model_status WHERE id = 1")
+        row = cur.fetchone()
+        if not row:
+            return {"model_size": "unknown", "device": "unknown", "compute_type": "unknown",
+                    "loaded": False, "load_time_s": None, "cuda_devices": 0}
+        return dict(row)
+
+
+async def db_upsert_model_status(model_size: str, device: str, compute_type: str,
+                                  loaded: bool, load_time_s: float, cuda_devices: int) -> None:
+    await _run(_sync_upsert_model_status, model_size, device, compute_type, loaded, load_time_s, cuda_devices)
+
+
+async def db_get_model_status() -> dict:
+    return await _run(_sync_get_model_status)

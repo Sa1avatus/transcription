@@ -276,7 +276,14 @@ async def models_page():
 @app.route('/api/models', methods=['GET'])
 async def api_list_models():
     """Return list of all available Whisper models with status."""
-    info = whisper_init.get_model_info()
+    # Try to get model status from DB (reported by worker) first
+    try:
+        from database import db_get_model_status
+        db_info = await db_get_model_status()
+        db_info["models_dir"] = str(settings.models_dir)
+        info = db_info
+    except Exception:
+        info = whisper_init.get_model_info()
     models = whisper_init.list_models()
     return jsonify({"current": info, "models": models}), 200
 
@@ -311,8 +318,14 @@ async def api_download_model():
 
 @app.route('/api/models/info', methods=['GET'])
 async def api_model_info():
-    """Return current model metadata."""
-    return jsonify(whisper_init.get_model_info()), 200
+    """Return current model metadata (from DB if available)."""
+    try:
+        from database import db_get_model_status
+        db_info = await db_get_model_status()
+        db_info["models_dir"] = str(settings.models_dir)
+        return jsonify(db_info), 200
+    except Exception:
+        return jsonify(whisper_init.get_model_info()), 200
 
 
 # =============================================================================

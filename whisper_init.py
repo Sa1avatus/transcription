@@ -78,6 +78,36 @@ _current_model_size: str | None = None
 _current_device: str | None = None
 _current_compute_type: str | None = None
 _model_load_time: float | None = None
+
+
+def _report_model_status_to_db():
+    """Report current model status to PostgreSQL (non-blocking, best-effort)."""
+    try:
+        import time as _time
+        cuda_count = 0
+        try:
+            _ensure_ml_deps()
+            cuda_count = ctranslate2.get_cuda_device_count()
+        except Exception:
+            pass
+        load_time = round(_time.time() - _model_load_time, 2) if _model_load_time else None
+        from database import db_upsert_model_status
+        import asyncio
+        coro = db_upsert_model_status(
+            model_size=_current_model_size or settings.whisper_model_size,
+            device=_current_device or "unknown",
+            compute_type=_current_compute_type or "unknown",
+            loaded=whisper_model is not None,
+            load_time_s=load_time,
+            cuda_devices=cuda_count,
+        )
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(coro)
+        else:
+            loop.run_until_complete(coro)
+    except Exception as exc:
+        logger.debug(f"Could not report model status to DB: {exc}")
 _switch_lock = asyncio.Lock()
 
 
@@ -193,6 +223,7 @@ async def switch_model(new_size: str) -> dict:
             _current_device = device
             _current_compute_type = compute_type
             _model_load_time = time.time()
+            _report_model_status_to_db()
             logger.info(f"Whisper SWITCH: {old_size} -> {new_size} ({device}/{compute_type})")
             return {
                 "ok": True,
@@ -252,3 +283,4 @@ def startup_load() -> None:
     _current_device = device
     _current_compute_type = compute_type
     _model_load_time = time.time()
+    _report_model_status_to_db()
