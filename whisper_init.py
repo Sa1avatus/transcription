@@ -16,10 +16,23 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import ctranslate2
-from faster_whisper import WhisperModel
-
 from config import BASE_PATH, logger, settings
+
+# Lazy imports for ML dependencies (not available in API-only container)
+ctranslate2 = None
+WhisperModel = None
+
+
+def _ensure_ml_deps():
+    """Import ML dependencies on demand (only in worker container)."""
+    global ctranslate2, WhisperModel
+    if ctranslate2 is None:
+        import ctranslate2 as _ct2
+        ctranslate2 = _ct2
+    if WhisperModel is None:
+        from faster_whisper import WhisperModel as _wm
+        WhisperModel = _wm
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,7 +73,7 @@ MODEL_DISK_SIZE: dict[str, str] = {
 # State
 # ---------------------------------------------------------------------------
 
-whisper_model: WhisperModel | None = None
+whisper_model = None  # WhisperModel | None (lazy type)
 _current_model_size: str | None = None
 _current_device: str | None = None
 _current_compute_type: str | None = None
@@ -85,8 +98,9 @@ def _is_downloaded(size: str) -> bool:
     return p.is_dir() and any(p.iterdir())
 
 
-def _init_whisper_model(model_size: str | None = None) -> WhisperModel:
+def _init_whisper_model(model_size: str | None = None):
     """Load a Whisper model. Called once at startup or on hot-swap."""
+    _ensure_ml_deps()
     size = model_size or settings.whisper_model_size
     model_path = _local_model_path(size)
     model_ref = str(model_path) if model_path.is_dir() else f"Systran/faster-whisper-{size}"
@@ -123,13 +137,19 @@ def _init_whisper_model(model_size: str | None = None) -> WhisperModel:
 def get_model_info() -> dict:
     """Return metadata about the currently loaded model."""
     global _current_model_size, _current_device, _current_compute_type, _model_load_time
+    cuda_count = 0
+    try:
+        _ensure_ml_deps()
+        cuda_count = ctranslate2.get_cuda_device_count()
+    except Exception:
+        pass
     return {
         "model_size": _current_model_size or settings.whisper_model_size,
         "device": _current_device or "unknown",
         "compute_type": _current_compute_type or "unknown",
         "loaded": whisper_model is not None,
         "load_time_s": round(time.time() - _model_load_time, 2) if _model_load_time else None,
-        "cuda_devices": ctranslate2.get_cuda_device_count(),
+        "cuda_devices": cuda_count,
         "models_dir": str(_models_dir()),
     }
 
@@ -202,6 +222,7 @@ async def download_model(size: str) -> dict:
         _models_dir().mkdir(parents=True, exist_ok=True)
 
         def _do_download():
+            _ensure_ml_deps()
             model_ref = f"Systran/faster-whisper-{size}"
             logger.info(f"Whisper DOWNLOAD: starting '{model_ref}'")
             # faster-whisper downloads automatically; we just need to load with local_files_only=False
