@@ -4,17 +4,43 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Transcription Service</title>
   <style>
-    :root{color-scheme:dark;--card:#152033;--muted:#94a3b8;--accent:#38bdf8;--ok:#34d399;--err:#fb7185}
+    :root{color-scheme:dark;--card:#152033;--muted:#94a3b8;--accent:#38bdf8;--ok:#34d399;--err:#fb7185;--border:#26354d;--input:#0d1829}
     *{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:15px system-ui,sans-serif}
     main{max-width:1100px;margin:0 auto;padding:48px 24px} h1{margin:0;font-size:32px} p{color:var(--muted)}
     .nav{display:flex;gap:16px;margin:16px 0 24px}
     .nav a{color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:6px;font-size:13px}
     .nav a:hover{color:var(--accent);background:rgba(56,189,248,.1)}
     .nav a.active{color:var(--accent);background:rgba(56,189,248,.15)}
-    .summary{display:flex;gap:16px;flex-wrap:wrap;margin:28px 0}.card{background:var(--card);border:1px solid #26354d;border-radius:12px;padding:18px;min-width:150px}
+    .summary{display:flex;gap:16px;flex-wrap:wrap;margin:28px 0}.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;min-width:150px}
     .value{display:block;font-size:28px;font-weight:700;color:var(--accent)} table{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden}
-    th,td{text-align:left;padding:14px;border-bottom:1px solid #26354d}th{color:var(--muted);font-weight:600}.status{font-weight:700}.done{color:var(--ok)}.error{color:var(--err)}
+    th,td{text-align:left;padding:14px;border-bottom:1px solid var(--border)}th{color:var(--muted);font-weight:600}.status{font-weight:700}.done{color:var(--ok)}.error{color:var(--err)}
     code{font-size:12px} button{background:var(--accent);border:0;border-radius:7px;padding:9px 13px;font-weight:700;cursor:pointer}
+
+    /* Upload zone */
+    .upload-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:28px}
+    .upload-section h2{margin:0 0 16px;font-size:18px;color:var(--accent)}
+    .upload-zone{border:2px dashed var(--border);border-radius:12px;padding:40px 24px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+    .upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(56,189,248,.05)}
+    .upload-zone.dragover{transform:scale(1.01)}
+    .upload-zone .icon{font-size:48px;margin-bottom:12px;display:block}
+    .upload-zone .label{font-size:16px;color:#e5e7eb;margin-bottom:6px}
+    .upload-zone .hint{font-size:13px;color:var(--muted)}
+    .upload-zone input[type=file]{display:none}
+    .upload-progress{margin-top:16px;display:none}
+    .upload-progress .bar-bg{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+    .upload-progress .bar{height:100%;background:var(--accent);width:0%;transition:width .3s;border-radius:3px}
+    .upload-progress .bar-text{font-size:13px;color:var(--muted);margin-top:6px}
+    .upload-result{margin-top:16px;padding:14px 18px;border-radius:8px;font-size:14px;display:none}
+    .upload-result.ok{background:#065f46;color:#a7f3d0;border:1px solid #10b981;display:block}
+    .upload-result.err{background:#7f1d1d;color:#fecaca;border:1px solid #ef4444;display:block}
+    .upload-result a{color:var(--accent)}
+
+    /* Active tasks in upload section */
+    .active-task{margin-top:16px;padding:12px 16px;background:var(--input);border:1px solid var(--border);border-radius:8px;display:none}
+    .active-task .task-id{font-family:monospace;color:var(--accent)}
+    .active-task .task-status{margin-top:6px}
+    .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(56,189,248,.3);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body><main>
@@ -24,11 +50,111 @@
     <a href="/models">Models</a>
     <a href="/settings">Settings</a>
   </div>
+
+  <!-- Upload Section -->
+  <div class="upload-section">
+    <h2>📤 Upload Audio</h2>
+    <div class="upload-zone" id="drop-zone">
+      <span class="icon">🎵</span>
+      <div class="label">Drop audio file here or click to browse</div>
+      <div class="hint">MP3, WAV, OGG, M4A, FLAC — up to 200 MB</div>
+      <input type="file" id="file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.aac,.wma,.opus">
+    </div>
+    <div class="upload-progress" id="upload-progress">
+      <div class="bar-bg"><div class="bar" id="progress-bar"></div></div>
+      <div class="bar-text" id="progress-text">Uploading...</div>
+    </div>
+    <div class="upload-result" id="upload-result"></div>
+    <div class="active-task" id="active-task">
+      <span id="task-info"></span>
+      <div class="task-status" id="task-status"></div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
   <p>Queue observability dashboard. Data refreshes every 10 seconds.</p>
   <div class="summary"><div class="card">Total <span class="value" id="total">—</span></div><div class="card">Pending <span class="value" id="pending">—</span></div><div class="card">Completed <span class="value" id="done">—</span></div><div class="card"><button id="refresh">Refresh</button></div></div>
   <table><thead><tr><th>Task</th><th>Status</th><th>Created</th><th>Channel</th></tr></thead><tbody id="tasks"><tr><td colspan="4">Loading…</td></tr></tbody></table>
 </main><script>
-const $=id=>document.getElementById(id); const esc=s=>String(s??'—').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#039;'}[c]));
-async function load(){try{const r=await fetch('/task/');if(!r.ok)throw Error();const d=await r.json(),tasks=d.tasks||[];$('total').textContent=d.total;$('pending').textContent=tasks.filter(t=>['pending','processing'].includes(t.status)).length;$('done').textContent=tasks.filter(t=>t.status==='done').length;$('tasks').innerHTML=tasks.slice(0,30).map(t=>`<tr><td><code>${esc(t.task_id)}</code></td><td class=\"status ${esc(t.status)}\">${esc(t.status)}</td><td>${esc(t.created_at)}</td><td>${t.uid?'OMNINET':t.chat_id?'Telegram':'API'}</td></tr>`).join('')||'<tr><td colspan=\"4\">No tasks yet.</td></tr>'}catch{$('tasks').innerHTML='<tr><td colspan=\"4\">Could not load task data.</td></tr>'}}
+const $=id=>document.getElementById(id); const esc=s=>String(s??'—').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[c]));
+
+/* ===== Dashboard ===== */
+async function load(){try{const r=await fetch('/task/');if(!r.ok)throw Error();const d=await r.json(),tasks=d.tasks||[];$('total').textContent=d.total;$('pending').textContent=tasks.filter(t=>['pending','processing'].includes(t.status)).length;$('done').textContent=tasks.filter(t=>t.status==='done').length;$('tasks').innerHTML=tasks.slice(0,30).map(t=>`<tr><td><code>${esc(t.task_id)}</code></td><td class="status ${esc(t.status)}">${esc(t.status)}</td><td>${esc(t.created_at)}</td><td>${t.uid?'OMNINET':t.chat_id?'Telegram':'API'}</td></tr>`).join('')||'<tr><td colspan="4">No tasks yet.</td></tr>'}catch{$('tasks').innerHTML='<tr><td colspan="4">Could not load task data.</td></tr>'}}
 $('refresh').onclick=load;load();setInterval(load,10000);
+
+/* ===== Upload ===== */
+const dropZone=$('drop-zone'), fileInput=$('file-input'), progressDiv=$('upload-progress'),
+      progressBar=$('progress-bar'), progressText=$('progress-text'),
+      resultDiv=$('upload-result'), activeTask=$('active-task');
+
+dropZone.onclick=()=>fileInput.click();
+dropZone.ondragover=e=>{e.preventDefault();dropZone.classList.add('dragover')};
+dropZone.ondragleave=()=>dropZone.classList.remove('dragover');
+dropZone.ondrop=e=>{e.preventDefault();dropZone.classList.remove('dragover');if(e.dataTransfer.files.length)uploadFile(e.dataTransfer.files[0])};
+fileInput.onchange=()=>{if(fileInput.files.length)uploadFile(fileInput.files[0])};
+
+async function uploadFile(file){
+  resultDiv.className='upload-result';resultDiv.style.display='none';
+  progressDiv.style.display='block';progressBar.style.width='0%';progressText.textContent=`Uploading ${file.name} (${(file.size/1048576).toFixed(1)} MB)...`;
+
+  const fd=new FormData();fd.append('file',file);
+  const xhr=new XMLHttpRequest();
+  xhr.upload.onprogress=e=>{if(e.lengthComputable){const pct=Math.round(e.loaded/e.total*100);progressBar.style.width=pct+'%';progressText.textContent=`Uploading ${file.name} — ${pct}%`}};
+  xhr.onload=async function(){
+    if(xhr.status===202){
+      const d=JSON.parse(xhr.responseText);
+      progressText.textContent='Upload complete, processing...';
+      progressBar.style.width='100%';
+      resultDiv.className='upload-result ok';
+      resultDiv.innerHTML=`✅ Task created: <code>${esc(d.task_id)}</code> — polling result...`;
+      resultDiv.style.display='block';
+      pollTask(d.task_id);
+    }else{
+      let msg='Upload failed';
+      try{msg=JSON.parse(xhr.responseText).error||msg}catch{}
+      progressDiv.style.display='none';
+      resultDiv.className='upload-result err';
+      resultDiv.textContent='❌ '+msg;
+      resultDiv.style.display='block';
+    }
+  };
+  xhr.onerror=()=>{
+    progressDiv.style.display='none';
+    resultDiv.className='upload-result err';
+    resultDiv.textContent='❌ Network error during upload';
+    resultDiv.style.display='block';
+  };
+  xhr.open('POST','/transcrib/');xhr.send(fd);
+}
+
+function pollTask(taskId){
+  activeTask.style.display='block';
+  $('task-info').innerHTML=`Task <span class="task-id">${esc(taskId)}</span>`;
+  $('task-status').innerHTML='<span class="spin"></span> Processing...';
+  const poll=async()=>{
+    try{
+      const r=await fetch('/task/'+taskId);
+      if(!r.ok)return setTimeout(poll,3000);
+      const d=await r.json();
+      if(d.status==='done'){
+        $('task-status').innerHTML=`<span style="color:var(--ok)">✅ Done!</span>`;
+        let html=`<strong>Transcript:</strong><pre style="white-space:pre-wrap;font-size:13px;max-height:300px;overflow:auto;background:var(--input);padding:12px;border-radius:6px;margin-top:8px">${esc(d.text||'')}</pre>`;
+        if(d.translations&&Object.keys(d.translations).length){
+          html+=`<div style="margin-top:10px"><strong>Translations:</strong></div>`;
+          for(const[tLang,tText]of Object.entries(d.translations)){
+            html+=`<div style="margin-top:4px"><em>${esc(tLang)}:</em> <span style="color:var(--muted)">${esc(tText)}</span></div>`;
+          }
+        }
+        $('task-status').innerHTML=html;
+        progressDiv.style.display='none';
+      }else if(d.status==='error'){
+        $('task-status').innerHTML=`<span style="color:var(--err)">❌ Error: ${esc(d.error||'Unknown')}</span>`;
+        progressDiv.style.display='none';
+      }else{
+        setTimeout(poll,3000);
+      }
+    }catch{setTimeout(poll,3000)}
+  };
+  poll();
+}
 </script></body></html>

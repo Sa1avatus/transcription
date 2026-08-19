@@ -141,29 +141,22 @@ BOT_API_FILE_LIMIT = 20 * 1024 * 1024   # 20 МБ
 async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int = 0) -> None:
     chat_id  = str(message.chat.id)
 
-    # Проверяем размер файла если не используем локальный сервер
-    local_server = settings.telegram_local_server
-    if not local_server and file_size > BOT_API_FILE_LIMIT:
-        size_mb = file_size / 1024 / 1024
-        await message.answer(
-            f"❌ Файл слишком большой: {size_mb:.1f} МБ\n\n"
-            f"Telegram Bot API позволяет скачивать файлы до 20 МБ.\n"
-            f"Для больших файлов настройте локальный сервер — "
-            f"инструкция в README проекта.",
-        )
-        return
-
+    # Всегда пытаемся скачать файл. Telegram Bot API технически
+    # поддерживает файлы до ~50 МБ через стандартный сервер,
+    # хотя документация указывает 20 МБ. Если реальный скачивание
+    # не удастся — сообщим пользователю.
     task_id  = uuid.uuid4().hex
     poll_url = f"/task/{task_id}"
     audio_path = os.path.join(TMP_DIR, f"tg_{task_id}{ext}")
 
     try:
-        await message.answer("⏳ Получил файл, ставлю в очередь на транскрибацию...")
+        size_info = f" ({file_size / 1048576:.1f} МБ)" if file_size else ""
+        await message.answer(f"⏳ Получил файл{size_info}, ставлю в очередь на транскрибацию...")
 
-        # The default aiogram download timeout is 30 s.  Audio from Telegram
-        # can take longer even when it is smaller than the Bot API size limit.
-        tg_file = await bot.get_file(file_id, request_timeout=120)
-        await bot.download_file(tg_file.file_path, destination=audio_path, timeout=120)
+        # Try downloading with generous timeout; Bot API often handles
+        # files up to ~50 MB even though docs say 20 MB.
+        tg_file = await bot.get_file(file_id, request_timeout=300)
+        await bot.download_file(tg_file.file_path, destination=audio_path, timeout=300)
         logger.info(f"[BOT] Аудио сохранено: {audio_path}, chat_id={chat_id}")
 
         await db_insert_task(task_id, uid=None, poll_url=poll_url, chat_id=chat_id)
@@ -179,9 +172,21 @@ async def _handle_audio(message: Message, file_id: str, ext: str, file_size: int
         logger.exception("[BOT] Ошибка приёма аудио")
         if os.path.exists(audio_path):
             os.remove(audio_path)
-        await message.answer(
-            "❌ Не удалось скачать файл из Telegram. Попробуйте отправить его ещё раз немного позже.",
-        )
+        if file_size and file_size > BOT_API_FILE_LIMIT:
+            size_mb = file_size / 1048576
+            await message.answer(
+                f"❌ Не удалось скачать файл ({size_mb:.1f} МБ) из Telegram.\n\n"
+                f"Для файлов >20 МБ загрузите через веб-интерфейс:\n"
+                f"• Откройте API в браузере (порт 5000)\n"
+                f"• Перейдите на вкладку Dashboard\n"
+                f"• Перетащите файл в зону загрузки\n\n"
+                f"Или настройте локальный Telegram Bot API сервер."
+            )
+        else:
+            await message.answer(
+                "❌ Не удалось скачать файл из Telegram. "
+                "Попробуйте отправить его ещё раз немного позже."
+            )
 
 
 @dp.message(F.voice)
