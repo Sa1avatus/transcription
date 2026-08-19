@@ -30,8 +30,13 @@ from database import db_insert_task, db_get_task, db_get_translation, db_upsert_
 from translation import LANGUAGES
 from gemini_vision import analyze_image_sync
 
-bot = Bot(token=settings.telegram_bot_token)
-logger.info("[BOT] Используем стандартный Bot API (лимит файлов 20 МБ)")
+bot_kwargs = {"token": settings.telegram_bot_token}
+if settings.telegram_local_server:
+    bot_kwargs["base"] = settings.telegram_local_server.rstrip("/") + "/"
+    logger.info(f"[BOT] Используем ЛОКАЛЬНЫЙ Bot API сервер: {settings.telegram_local_server} (без лимита 20 МБ)")
+else:
+    logger.info("[BOT] Используем стандартный Bot API (лимит файлов 20 МБ)")
+bot = Bot(**bot_kwargs)
 dp = Dispatcher()
 
 # Временное хранилище текстов для перевода (in-memory, не нужна БД)

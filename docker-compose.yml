@@ -54,8 +54,9 @@ services:
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql://transcription:${POSTGRES_PASSWORD:-transcription_dev_password}@postgres:5432/transcription
+      DATABASE_URL: postgresql://transcription:***@postgres:5432/transcription
       DATA_DIRECTORY: /app/data
+      TELEGRAM_LOCAL_SERVER: http://telegram-bot-api:8081
     volumes:
       - app-data:/app/data
     depends_on:
@@ -63,6 +64,25 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      telegram-bot-api:
+        condition: service_started
+
+  telegram-bot-api:
+    profiles: [telegram]
+    image: aiogram/telegram-bot-api:latest
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: "true"
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   miniapp-gateway:
     profiles: [telegram]
@@ -105,3 +125,4 @@ volumes:
   models-data:
   redis-data:
   postgres-data:
+  telegram-bot-api-data:
