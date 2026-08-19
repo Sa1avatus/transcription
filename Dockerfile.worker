@@ -1,22 +1,29 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.11-slim
+FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
 WORKDIR /app
+
+# Install Python 3.11
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3.11 python3.11-venv python3-pip curl && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 ARG INSTALL_NLLB=false
 ARG INSTALL_QWEN=false
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
+
 COPY requirements.txt requirements-worker.txt requirements-nllb.txt requirements-qwen.txt .
 # Expensive groups are isolated: completed layers and downloaded wheels survive retries.
-RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade pip
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-worker.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    if [ "$INSTALL_NLLB" = "true" ]; then \
+RUN pip install --upgrade pip
+RUN pip install -r requirements-worker.txt
+RUN if [ "$INSTALL_NLLB" = "true" ]; then \
       pip install --index-url "$PYTORCH_INDEX_URL" torch && pip install -r requirements-nllb.txt; \
     fi
-RUN --mount=type=cache,target=/root/.cache/pip \
-    if [ "$INSTALL_QWEN" = "true" ]; then pip install -r requirements-qwen.txt; fi
+RUN if [ "$INSTALL_QWEN" = "true" ]; then pip install -r requirements-qwen.txt; fi
 COPY requirements-db.txt .
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-db.txt
+RUN pip install -r requirements-db.txt
 COPY . .
 RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser

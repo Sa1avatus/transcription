@@ -40,6 +40,13 @@ services:
     volumes:
       - app-data:/app/data
       - models-data:/app/data/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     depends_on:
       redis:
         condition: service_healthy
