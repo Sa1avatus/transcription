@@ -168,6 +168,26 @@ async def list_tasks():
     return jsonify({"tasks": rows, "total": len(rows)}), 200
 
 
+@app.route('/task/<task_id>', methods=['DELETE'])
+async def delete_task(task_id: str):
+    """Delete/cancel a single task."""
+    from database import db_delete_task
+    try:
+        await db_delete_task(task_id)
+        task_store.pop(task_id, None)
+        return jsonify({"ok": True, "deleted": task_id}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/task/clear', methods=['POST'])
+async def clear_stuck_tasks():
+    """Reset stuck 'processing'/'pending' tasks to 'error' status."""
+    from database import db_clear_stuck_tasks
+    count = await db_clear_stuck_tasks()
+    return jsonify({"ok": True, "cleared": count}), 200
+
+
 # =============================================================================
 # ПЕРЕВОД
 # =============================================================================

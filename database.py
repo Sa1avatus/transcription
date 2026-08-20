@@ -289,6 +289,8 @@ async def db_get_user_statistics(chat_id: str) -> dict:
 if __import__("config").settings.database_url:
     from database_postgres import (  # noqa: F401
         db_all_tasks,
+        db_clear_stuck_tasks,
+        db_delete_task,
         db_get_all_settings,
         db_get_all_translations,
         db_get_model_status,
@@ -303,3 +305,26 @@ if __import__("config").settings.database_url:
         db_upsert_translation,
         init_db,
     )
+else:
+    # SQLite fallback: db_delete_task and db_clear_stuck_tasks
+    import sqlite3 as _sqlite3
+
+    def _sync_delete_task(task_id: str) -> None:
+        with _sqlite3.connect(str(__import__("config").settings.data_dir / "tasks.db")) as conn:
+            conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+            conn.commit()
+
+    def _sync_clear_stuck_tasks() -> int:
+        with _sqlite3.connect(str(__import__("config").settings.data_dir / "tasks.db")) as conn:
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'error', result = 'Cleared by admin' "
+                "WHERE status IN ('pending', 'processing')",
+            )
+            conn.commit()
+            return cur.rowcount
+
+    async def db_delete_task(task_id: str) -> None:
+        await _run(_sync_delete_task, task_id)
+
+    async def db_clear_stuck_tasks() -> int:
+        return await _run(_sync_clear_stuck_tasks)

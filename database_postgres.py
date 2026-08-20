@@ -229,6 +229,29 @@ async def db_upsert_settings(data: dict[str, str]) -> None:
     await _run(_sync_upsert_settings, data)
 
 
+def _sync_delete_task(task_id: str) -> None:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM tasks WHERE task_id = %s", (task_id,))
+
+
+def _sync_clear_stuck_tasks() -> int:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tasks SET status = 'error', result = 'Cleared by admin', updated_at = %s "
+            "WHERE status IN ('pending', 'processing')",
+            (_now(),),
+        )
+        return cur.rowcount
+
+
+async def db_delete_task(task_id: str) -> None:
+    await _run(_sync_delete_task, task_id)
+
+
+async def db_clear_stuck_tasks() -> int:
+    return await _run(_sync_clear_stuck_tasks)
+
+
 def _sync_upsert_model_status(model_size: str, device: str, compute_type: str,
                                loaded: bool, load_time_s: float, cuda_devices: int) -> None:
     now = _now()
