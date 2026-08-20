@@ -279,7 +279,7 @@ class GeminiTranslator(BaseTranslator):
 
     def _call(self, prompt: str) -> str:
         import time
-        delays = [5, 15, 30]   # секунд между попытками при 429 или обрыве
+        delays = [10, 30, 60, 120]   # longer delays for 429 rate limiting
         for attempt, delay in enumerate(delays + [None], 1):
             try:
                 response = httpx.post(
@@ -315,14 +315,22 @@ class GeminiTranslator(BaseTranslator):
 
     # Gemini: process in chunks to avoid API timeouts on large transcripts
     GEMINI_CHUNK_SIZE = 50  # lines per Gemini API call
+    GEMINI_CHUNK_DELAY = 4  # seconds between chunks to respect rate limits
 
     def translate_lines(self, lines: list[str], src_lang: str, tgt_lang: str) -> list[str]:
         """Translates lines in chunks of ~50 to avoid Gemini timeouts."""
+        import time as _time
         src_label = self._lang_label(src_lang)
         tgt_label = self._lang_label(tgt_lang)
 
         all_translated: list[str] = []
-        for chunk_offset in range(0, len(lines), self.GEMINI_CHUNK_SIZE):
+        total_chunks = (len(lines) + self.GEMINI_CHUNK_SIZE - 1) // self.GEMINI_CHUNK_SIZE
+        for chunk_idx, chunk_offset in enumerate(range(0, len(lines), self.GEMINI_CHUNK_SIZE)):
+            # Delay between chunks to avoid 429
+            if chunk_idx > 0:
+                logger.info(f"Gemini chunk {chunk_idx+1}/{total_chunks}: waiting {self.GEMINI_CHUNK_DELAY}s...")
+                _time.sleep(self.GEMINI_CHUNK_DELAY)
+
             chunk = lines[chunk_offset: chunk_offset + self.GEMINI_CHUNK_SIZE]
             numbered = "\n".join(f"{i+1}. {line}" for i, line in enumerate(chunk))
             prompt = (
@@ -332,6 +340,7 @@ class GeminiTranslator(BaseTranslator):
                 f"{numbered}"
             )
 
+            logger.info(f"Gemini chunk {chunk_idx+1}/{total_chunks}: {len(chunk)} lines")
             raw = self._call(prompt)
 
             # Parse numbered response
