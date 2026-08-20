@@ -202,7 +202,16 @@ async def get_translation(task_id: str, tgt_lang: str):
 
     Коды языков: eng_Latn, rus_Cyrl, vie_Latn, zho_Hans, fra_Latn,
                  deu_Latn, kor_Hang, jpn_Jpan
+    Также принимает короткие коды: en, ru, vi, zh, fr, de, ko, ja
     """
+    # Short code -> NLLB code mapping
+    SHORT_TO_NLLB = {
+        "en": "eng_Latn", "ru": "rus_Cyrl", "vi": "vie_Latn",
+        "zh": "zho_Hans", "fr": "fra_Latn", "de": "deu_Latn",
+        "ko": "kor_Hang", "ja": "jpn_Jpan",
+    }
+    tgt_lang = SHORT_TO_NLLB.get(tgt_lang, tgt_lang)
+
     if tgt_lang not in LANGUAGES:
         return jsonify({
             "error": f"Unknown language code '{tgt_lang}'",

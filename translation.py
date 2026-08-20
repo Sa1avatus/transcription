@@ -406,9 +406,15 @@ class TranslationError(RuntimeError):
 
 def run_translate_sync(text: str, src_lang: str, tgt_lang: str) -> str:
     """Синхронный перевод (запускается через run_in_executor)."""
+    global nllb_pipeline
     if not src_lang or src_lang == tgt_lang:
         src_lang = DEFAULT_SRC_LANG
     try:
+        # Lazy-init translator for API container (not only worker)
+        if nllb_pipeline is None:
+            nllb_pipeline = _init_translator()
+            logger.info(f"[{settings.translation_backend}] translator lazy-initialized for API")
+
         backend_name = settings.translation_backend
         logger.info(f"[{backend_name}] перевод {src_lang} → {tgt_lang}, символов={len(text)}")
 
