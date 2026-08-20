@@ -286,7 +286,7 @@ class GeminiTranslator(BaseTranslator):
                     self.url,
                     params={"key": self.api_key},
                     json={"contents": [{"parts": [{"text": prompt}]}]},
-                    timeout=60.0,
+                    timeout=120.0,
                 )
                 if response.status_code == 429:
                     if delay is None:
