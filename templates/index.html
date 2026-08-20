@@ -200,12 +200,26 @@ async function showTranslation(taskId, lang){
 async function requestTranslation(taskId, lang){
   const tresult=$('tresult-'+taskId);
   tresult.style.display='block';
-  tresult.innerHTML=`<span class="spin"></span> Translating to ${LANGUAGES[lang]||lang}...`;
+  tresult.innerHTML=`<span class="spin"></span> Translating to ${LANGUAGES[lang]||lang}... (may take a few minutes for large files)`;
   try{
-    const r=await fetch(`/translated/${taskId}/${lang}`);
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),600000); // 10min timeout
+    const r=await fetch(`/translated/${taskId}/${lang}`,{signal:ctrl.signal});
+    clearTimeout(timer);
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      tresult.innerHTML=`<strong>${LANGUAGES[lang]||lang}:</strong><br>❌ ${esc(d.error||'Translation failed ('+r.status+')')}`;
+      return;
+    }
     const d=await r.json();
     tresult.innerHTML=`<strong>${LANGUAGES[lang]||lang}:</strong><br>${esc(d.translated||d.result||'No translation')}`;
-  }catch{tresult.textContent='Error requesting translation'}
+  }catch(e){
+    if(e.name==='AbortError'){
+      tresult.innerHTML=`<strong>${LANGUAGES[lang]||lang}:</strong><br>❌ Translation timed out. Try again.`;
+    }else{
+      tresult.innerHTML=`<strong>${LANGUAGES[lang]||lang}:</strong><br>❌ Error: ${esc(e.message)}`;
+    }
+  }
 }
 
 /* Clear stuck tasks */
