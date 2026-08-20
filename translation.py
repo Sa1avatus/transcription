@@ -313,43 +313,46 @@ class GeminiTranslator(BaseTranslator):
         )
         return self._call(prompt)
 
+    # Gemini: process in chunks to avoid API timeouts on large transcripts
+    GEMINI_CHUNK_SIZE = 50  # lines per Gemini API call
+
     def translate_lines(self, lines: list[str], src_lang: str, tgt_lang: str) -> list[str]:
-        """
-        Отправляет все строки одним запросом — Gemini хорошо держит контекст диалога.
-        Строки нумеруются чтобы модель вернула их в том же порядке.
-        """
+        """Translates lines in chunks of ~50 to avoid Gemini timeouts."""
         src_label = self._lang_label(src_lang)
         tgt_label = self._lang_label(tgt_lang)
 
-        numbered = "\n".join(f"{line_number}. {line}" for line_number, line in enumerate(lines, 1))
-        prompt = (
-            f"You are translating a phone call transcript from {src_label} to {tgt_label}.\n"
-            f"Translate each numbered line. Keep the same numbering. "
-            f"Return ONLY the translated numbered lines, nothing else.\n\n"
-            f"{numbered}"
-        )
-
-        raw = self._call(prompt)
-
-        # Парсим пронумерованный ответ
-        translated_lines: list[str] = []
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            # Убираем номер "1. ", "1) ", "1- " и т.п.
-            cleaned = re.sub(r'^\d+[.)\-]\s*', '', line)
-            if cleaned:
-                translated_lines.append(cleaned)
-
-        # Если количество не совпало — возвращаем как есть
-        if len(translated_lines) != len(lines):
-            logger.warning(
-                f"Gemini: ожидалось {len(lines)} строк, получено {len(translated_lines)} — возвращаем блоком"
+        all_translated: list[str] = []
+        for chunk_offset in range(0, len(lines), self.GEMINI_CHUNK_SIZE):
+            chunk = lines[chunk_offset: chunk_offset + self.GEMINI_CHUNK_SIZE]
+            numbered = "\n".join(f"{i+1}. {line}" for i, line in enumerate(chunk))
+            prompt = (
+                f"You are translating a phone call transcript from {src_label} to {tgt_label}.\n"
+                f"Translate each numbered line. Keep the same numbering. "
+                f"Return ONLY the translated numbered lines, nothing else.\n\n"
+                f"{numbered}"
             )
-            return [raw]
 
-        return translated_lines
+            raw = self._call(prompt)
+
+            # Parse numbered response
+            chunk_translated: list[str] = []
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                cleaned = re.sub(r'^\d+[.)\-]\s*', '', line)
+                if cleaned:
+                    chunk_translated.append(cleaned)
+
+            if len(chunk_translated) != len(chunk):
+                logger.warning(
+                    f"Gemini chunk {chunk_offset}: expected {len(chunk)} lines, got {len(chunk_translated)} — using raw block"
+                )
+                all_translated.append(raw)
+            else:
+                all_translated.extend(chunk_translated)
+
+        return all_translated
 
 
 def _init_gemini() -> GeminiTranslator:
