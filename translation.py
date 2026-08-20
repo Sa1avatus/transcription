@@ -314,8 +314,8 @@ class GeminiTranslator(BaseTranslator):
         return self._call(prompt)
 
     # Gemini: process in chunks to avoid API timeouts on large transcripts
-    GEMINI_CHUNK_SIZE = 50  # lines per Gemini API call
-    GEMINI_CHUNK_DELAY = 4  # seconds between chunks to respect rate limits
+    GEMINI_CHUNK_SIZE = 200  # lines per Gemini API call (larger chunks = fewer calls)
+    GEMINI_CHUNK_DELAY = 8  # seconds between chunks to respect rate limits
 
     def translate_lines(self, lines: list[str], src_lang: str, tgt_lang: str) -> list[str]:
         """Translates lines in chunks of ~50 to avoid Gemini timeouts."""
